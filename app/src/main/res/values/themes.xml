@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme — edge-to-edge, no action bar (Compose handles the AppBar). -->
+    <style name="Theme.PocketCraft" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Window background matches our dark navy — prevents white flash on launch. -->
+        <item name="android:windowBackground">@color/background_dark</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

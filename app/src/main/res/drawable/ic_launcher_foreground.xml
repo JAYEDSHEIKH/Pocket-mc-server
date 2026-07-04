@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher icon foreground — teal server rack icon on a transparent background.
+  Designed to sit within the 66dp safe zone of a 108dp adaptive icon canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Server unit 1 -->
+    <path
+        android:fillColor="#00E5CC"
+        android:pathData="M24,28A4,4 0 0,1 28,24H80A4,4 0 0,1 84,28V44A4,4 0 0,1 80,48H28A4,4 0 0,1 24,44V28Z" />
+
+    <!-- LED dot -->
+    <path
+        android:fillColor="#080C14"
+        android:pathData="M74,34A3,3 0 0,1 77,37A3,3 0 0,1 74,40A3,3 0 0,1 71,37A3,3 0 0,1 74,34Z" />
+
+    <!-- Server unit 2 -->
+    <path
+        android:fillColor="#00BFA5"
+        android:pathData="M24,52A4,4 0 0,1 28,48H80A4,4 0 0,1 84,52V68A4,4 0 0,1 80,72H28A4,4 0 0,1 24,68V52Z" />
+
+    <!-- LED dot -->
+    <path
+        android:fillColor="#080C14"
+        android:pathData="M74,58A3,3 0 0,1 77,61A3,3 0 0,1 74,64A3,3 0 0,1 71,61A3,3 0 0,1 74,58Z" />
+
+    <!-- Server unit 3 -->
+    <path
+        android:fillColor="#009688"
+        android:pathData="M24,76A4,4 0 0,1 28,72H80A4,4 0 0,1 84,76V84A4,4 0 0,1 80,88H28A4,4 0 0,1 24,84V76Z" />
+
+</vector>

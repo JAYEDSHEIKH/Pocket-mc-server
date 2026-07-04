@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Small notification icon — must be a single-color silhouette (Android ignores color in
+  the status bar; color is only shown in the expanded notification shade).
+  Design: a simple server/rack silhouette.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Outer server chassis -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2,4A2,2 0 0,1 4,2H20A2,2 0 0,1 22,4V8A2,2 0 0,1 20,10H4A2,2 0 0,1 2,8V4Z" />
+
+    <!-- Status LED on top unit -->
+    <path
+        android:fillColor="#FF080C14"
+        android:pathData="M18,5.5A1,1 0 0,1 19,6.5A1,1 0 0,1 18,7.5A1,1 0 0,1 17,6.5A1,1 0 0,1 18,5.5Z" />
+
+    <!-- Middle server unit -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2,11A2,2 0 0,1 4,9H20A2,2 0 0,1 22,11V15A2,2 0 0,1 20,17H4A2,2 0 0,1 2,15V11Z" />
+
+    <!-- Status LED on middle unit -->
+    <path
+        android:fillColor="#FF080C14"
+        android:pathData="M18,12.5A1,1 0 0,1 19,13.5A1,1 0 0,1 18,14.5A1,1 0 0,1 17,13.5A1,1 0 0,1 18,12.5Z" />
+
+    <!-- Bottom server unit -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2,18A2,2 0 0,1 4,16H20A2,2 0 0,1 22,18V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V18Z" />
+
+</vector>

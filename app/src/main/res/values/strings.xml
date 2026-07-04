@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PocketCraft</string>
+    <string name="channel_server_name">Server Manager</string>
+    <string name="channel_server_desc">Shows while a Minecraft server is running on this device</string>
+    <string name="notification_title">PocketCraft</string>
+    <string name="notification_no_servers">No servers running</string>
+    <string name="notification_running">%d server running</string>
+    <string name="notification_running_plural">%d servers running</string>
+</resources>

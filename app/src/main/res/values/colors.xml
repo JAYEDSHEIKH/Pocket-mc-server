@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only what the XML theme needs — Compose uses Color.kt for everything else. -->
+    <color name="background_dark">#080C14</color>
+    <color name="primary_teal">#00E5CC</color>
+</resources>
