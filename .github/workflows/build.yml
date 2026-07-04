@@ -1,0 +1,144 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, develop, master ]
+  pull_request:
+    branches: [ main, develop, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug + Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Java for Gradle ─────────────────────────────────────────────────────
+      - name: Set up JDK 21 (for Gradle)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # ── Gradle cache ────────────────────────────────────────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── Download & bundle the aarch64 JRE ───────────────────────────────────
+      # Uses Adoptium (Eclipse Temurin) API — URLs are stable and version-pinned.
+      - name: Download OpenJDK 21 aarch64 JRE
+        run: |
+          set -e
+
+          # Fetch the latest JDK 21 JRE URL from Adoptium API
+          RELEASE_URL=$(curl -sSf \
+            "https://api.adoptium.net/v3/assets/latest/21/jdk?architecture=aarch64&image_type=jre&os=linux&vendor=eclipse" \
+            | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for entry in data:
+              pkg = entry.get('binary', {}).get('package', {})
+              link = pkg.get('link', '')
+              if link.endswith('.tar.gz'):
+                  print(link)
+                  break
+          ")
+
+          if [ -z "$RELEASE_URL" ]; then
+            echo "ERROR: Could not determine JRE download URL from Adoptium API"
+            exit 1
+          fi
+
+          echo "Downloading JRE from: $RELEASE_URL"
+          curl -sSfL "$RELEASE_URL" -o /tmp/jre-aarch64.tar.gz
+
+          SIZE=$(stat -c%s /tmp/jre-aarch64.tar.gz)
+          echo "Downloaded $SIZE bytes"
+          if [ "$SIZE" -lt 10000000 ]; then
+            echo "ERROR: Downloaded tarball is too small"
+            exit 1
+          fi
+
+          mkdir -p app/src/main/assets/jre
+          cp /tmp/jre-aarch64.tar.gz app/src/main/assets/jre/aarch64-jdk21.tar.gz
+          echo "JRE asset placed ($(du -h app/src/main/assets/jre/aarch64-jdk21.tar.gz | cut -f1))"
+
+      # ── Grant gradlew permission ────────────────────────────────────────────
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # ── Build DEBUG APK ─────────────────────────────────────────────────────
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Copy debug APK
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             artifacts/PocketCraft-debug-${{ github.run_number }}.apk
+
+      # ── Decode signing keystore (release only, secrets must be set) ─────────
+      - name: Set up release signing
+        if: >
+          github.event_name != 'pull_request' &&
+          secrets.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+          echo "Keystore decoded successfully"
+
+      # ── Build RELEASE APK ───────────────────────────────────────────────────
+      - name: Build release APK
+        if: >
+          github.event_name != 'pull_request' &&
+          secrets.KEYSTORE_BASE64 != ''
+        env:
+          SIGNING_STORE_FILE: /tmp/release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASS }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASS }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Copy release APK
+        if: >
+          github.event_name != 'pull_request' &&
+          secrets.KEYSTORE_BASE64 != ''
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk \
+             artifacts/PocketCraft-release-${{ github.run_number }}.apk
+
+      # ── Upload artifacts ────────────────────────────────────────────────────
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketCraft-${{ github.run_number }}
+          path: artifacts/
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "## ✅ Build #${{ github.run_number }} complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`PocketCraft-debug-${{ github.run_number }}.apk\` | Debug build — install on any device for testing |" >> $GITHUB_STEP_SUMMARY
+          if [ -f "artifacts/PocketCraft-release-${{ github.run_number }}.apk" ]; then
+            echo "| \`PocketCraft-release-${{ github.run_number }}.apk\` | Signed release build — ready for distribution |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| _(release not built)_ | Add \`KEYSTORE_BASE64\`, \`KEYSTORE_PASS\`, \`KEY_ALIAS\`, \`KEY_PASS\` secrets to enable |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### JRE bundled" >> $GITHUB_STEP_SUMMARY
+          echo "OpenJDK 21 aarch64 is included. Servers will start on arm64 Android devices (API 26+)." >> $GITHUB_STEP_SUMMARY
