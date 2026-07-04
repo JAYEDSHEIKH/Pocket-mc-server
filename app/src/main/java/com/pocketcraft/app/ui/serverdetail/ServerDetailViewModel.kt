@@ -86,7 +86,10 @@ class ServerDetailViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .flatMapLatest {
                     processManager.getConsoleFlow(id)
-                        ?.scan(emptyList<String>()) { acc, line -> (acc + line).takeLast(2_000) }
+                        ?.scan(emptyList<String>()) { acc, line ->
+                            val cap = com.pocketcraft.app.AppPrefs.consoleMaxLines.value
+                            (acc + line).takeLast(cap)
+                        }
                         ?: flowOf(emptyList())
                 }
         }
@@ -132,6 +135,35 @@ class ServerDetailViewModel @Inject constructor(
                     _downloadProgress.update { progress }
                 }
         }
+
+        // Observe error events from the process manager (e.g. missing JRE, failed jar, crash)
+        viewModelScope.launch {
+            processManager.errorEvents
+                .filter { (id, _) -> id == serverId }
+                .collect { (_, message) ->
+                    _error.update {
+                        AppError(
+                            title = "Server Error",
+                            message = message
+                        )
+                    }
+                }
+        }
+
+        // When download finishes (success or failure), reload the file list
+        viewModelScope.launch {
+            WorkManager.getInstance(context)
+                .getWorkInfosByTagFlow("download_$serverId")
+                .collect { infos ->
+                    val finished = infos.any {
+                        it.state == WorkInfo.State.SUCCEEDED || it.state == WorkInfo.State.FAILED
+                    }
+                    if (finished) {
+                        val serverDirNow = storageManager.resolveServerDir(serverId)
+                        loadFiles(serverDirNow)
+                    }
+                }
+        }
     }
 
     // ── Server control ─────────────────────────────────────────────────────────
@@ -152,8 +184,8 @@ class ServerDetailViewModel @Inject constructor(
                 serverProfileDao.updateStatus(prof.id, ServerStatus.CRASHED)
                 _error.update {
                     AppError(
-                        title = "Failed to start server",
-                        message = "The server could not be launched.\n${e.message}",
+                        title = "Failed to Start Server",
+                        message = "The server could not be launched.\n\n${e.message}",
                         detail = e.stackTraceToString()
                     )
                 }
@@ -195,7 +227,7 @@ class ServerDetailViewModel @Inject constructor(
                 if (processManager.isRunning(prof.id)) {
                     context.startService(ServerForegroundService.stopServerIntent(context, prof.id))
                     var waited = 0
-                    while (processManager.isRunning(prof.id) && waited < 20) {
+                    while (processManager.isRunning(prof.id) && waited < 40) {
                         delay(500); waited++
                     }
                 }
@@ -208,7 +240,11 @@ class ServerDetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 _loading.update { null }
                 _error.update {
-                    AppError("Delete failed", "Could not delete server: ${e.message}", e.stackTraceToString())
+                    AppError(
+                        title = "Delete Failed",
+                        message = "Could not fully delete server: ${e.message}",
+                        detail = e.stackTraceToString()
+                    )
                 }
             }
         }
@@ -261,12 +297,22 @@ class ServerDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val dest = File(file.parentFile, trimmed)
             if (dest.exists()) {
-                _error.update { AppError("Rename failed", "A file named '$trimmed' already exists in this folder.") }
+                _error.update {
+                    AppError(
+                        title = "Rename Failed",
+                        message = "A file named \"$trimmed\" already exists in this folder."
+                    )
+                }
                 return@launch
             }
             val ok = file.renameTo(dest)
             if (!ok) {
-                _error.update { AppError("Rename failed", "Could not rename '${file.name}'. The file may be in use.") }
+                _error.update {
+                    AppError(
+                        title = "Rename Failed",
+                        message = "Could not rename \"${file.name}\".\nThe file may be in use by the running server."
+                    )
+                }
             }
             loadFiles()
         }
@@ -274,21 +320,41 @@ class ServerDetailViewModel @Inject constructor(
 
     fun moveFile(file: File, targetDir: File) {
         if (file.parentFile?.canonicalPath == targetDir.canonicalPath) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val dest = File(targetDir, file.name)
-            if (dest.exists()) {
-                _error.update { AppError("Move failed", "A file named '${file.name}' already exists in the target folder.") }
-                return@launch
-            }
-            val moved = file.renameTo(dest)
-            if (!moved) {
-                runCatching {
-                    if (file.isDirectory) { file.copyRecursively(dest); file.deleteRecursively() }
-                    else { file.copyTo(dest); file.delete() }
-                }.onFailure { e ->
-                    _error.update { AppError("Move failed", "Could not move '${file.name}': ${e.message}", e.stackTraceToString()) }
+        viewModelScope.launch {
+            _loading.update { LoadingState("Moving", "Moving ${file.name}…") }
+            withContext(Dispatchers.IO) {
+                val dest = File(targetDir, file.name)
+                if (dest.exists()) {
+                    _error.update {
+                        AppError(
+                            title = "Move Failed",
+                            message = "A file named \"${file.name}\" already exists in the target folder."
+                        )
+                    }
+                    return@withContext
+                }
+                val moved = file.renameTo(dest)
+                if (!moved) {
+                    runCatching {
+                        if (file.isDirectory) {
+                            file.copyRecursively(dest)
+                            file.deleteRecursively()
+                        } else {
+                            file.copyTo(dest)
+                            file.delete()
+                        }
+                    }.onFailure { e ->
+                        _error.update {
+                            AppError(
+                                title = "Move Failed",
+                                message = "Could not move \"${file.name}\".\n${e.message}",
+                                detail = e.stackTraceToString()
+                            )
+                        }
+                    }
                 }
             }
+            _loading.update { null }
             loadFiles()
         }
     }
@@ -322,7 +388,11 @@ class ServerDetailViewModel @Inject constructor(
                     } catch (e: Exception) {
                         destFile.delete()
                         _error.update {
-                            AppError("Upload failed", "Could not upload '$name': ${e.message}", e.stackTraceToString())
+                            AppError(
+                                title = "Upload Failed",
+                                message = "Could not upload \"$name\".\n${e.message}",
+                                detail = e.stackTraceToString()
+                            )
                         }
                     }
                 }

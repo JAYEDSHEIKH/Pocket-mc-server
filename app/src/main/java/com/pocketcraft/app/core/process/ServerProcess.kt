@@ -26,8 +26,10 @@ class ServerProcess(
     companion object {
         private const val TAG = "ServerProcess"
         private const val CONSOLE_BUFFER = 2_000
-        private const val STOP_TIMEOUT_MS = 30_000L
     }
+
+    private val stopTimeoutMs: Long
+        get() = com.pocketcraft.app.AppPrefs.stopTimeoutSeconds.value * 1000L
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -145,7 +147,7 @@ class ServerProcess(
         withContext(Dispatchers.IO) {
             val proc = process ?: return@withContext
             runCatching {
-                val exited = proc.waitFor(STOP_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                val exited = proc.waitFor(stopTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (!exited) {
                     Log.w(TAG, "[$serverId] Graceful stop timed out — force killing")
                     proc.destroyForcibly()

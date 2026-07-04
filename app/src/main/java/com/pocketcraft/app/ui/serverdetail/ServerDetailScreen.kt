@@ -13,10 +13,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pocketcraft.app.AppPrefs
 import com.pocketcraft.app.data.ServerStatus
 import com.pocketcraft.app.ui.components.ErrorDialog
 import com.pocketcraft.app.ui.components.ProgressDialog
@@ -43,8 +45,17 @@ fun ServerDetailScreen(
     val error         by viewModel.error.collectAsStateWithLifecycle()
     val loading       by viewModel.loading.collectAsStateWithLifecycle()
 
-    val haptic  = LocalHapticFeedback.current
-    val context = LocalContext.current
+    val haptic       = LocalHapticFeedback.current
+    val context      = LocalContext.current
+    val view         = LocalView.current
+    val keepScreenOn by AppPrefs.keepScreenOn.collectAsStateWithLifecycle()
+
+    // Apply keep-screen-on when the pref is enabled AND a server is running
+    DisposableEffect(keepScreenOn, status) {
+        val shouldKeep = keepScreenOn && status == ServerStatus.RUNNING
+        view.keepScreenOn = shouldKeep
+        onDispose { view.keepScreenOn = false }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showEditDialog by remember { mutableStateOf(false) }

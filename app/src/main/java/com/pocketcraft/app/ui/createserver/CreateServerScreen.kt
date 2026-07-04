@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketcraft.app.data.LoaderType
+import com.pocketcraft.app.ui.components.ErrorDialog
 import com.pocketcraft.app.ui.theme.*
 import kotlin.math.roundToInt
 
@@ -51,6 +52,46 @@ fun CreateServerScreen(
         createdId?.let { id ->
             viewModel.consumeCreatedServerId()
             onServerCreated(id)
+        }
+    }
+
+    // Show error dialog if server creation failed
+    state.creationError?.let { error ->
+        ErrorDialog(error = error, onDismiss = viewModel::clearCreationError)
+    }
+
+    // Show loading overlay while creating
+    if (state.isCreating) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false
+            )
+        ) {
+            androidx.compose.material3.Card(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        "Creating server…",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Fetching build info and starting the download.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
         }
     }
 

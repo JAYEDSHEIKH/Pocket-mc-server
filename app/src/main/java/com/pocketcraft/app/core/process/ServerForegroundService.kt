@@ -150,15 +150,63 @@ class ServerForegroundService : Service() {
     ) {
         Log.i(TAG, "[$serverId] Starting — serverDir=${serverDir.absolutePath}")
 
+        // ── Pre-flight: JRE ───────────────────────────────────────────────────
         val javaBinary = jreInstaller.getJavaBinary()
         if (javaBinary == null) {
-            val msg = "JRE could not be extracted from assets. Check device storage."
+            val jrePath = storageManager.jreDir.absolutePath
+            val msg = buildString {
+                appendLine("Java Runtime (JRE) could not be found.")
+                appendLine()
+                appendLine("The bundled OpenJDK 21 (aarch64) could not be extracted from this APK.")
+                appendLine()
+                appendLine("Most likely causes:")
+                appendLine("• This APK was built locally without the JRE asset inside it.")
+                appendLine("• The GitHub Actions CI workflow has not run yet.")
+                appendLine()
+                appendLine("Fix: Download the debug APK from your GitHub repository's")
+                appendLine("Actions tab → latest run → Artifacts → PocketCraft-debug.apk")
+                appendLine()
+                appendLine("Expected JRE path: $jrePath")
+            }
             Log.e(TAG, "[$serverId] $msg")
+            manager.emitError(serverId, msg)
             serverProfileDao.updateStatus(serverId, ServerStatus.CRASHED)
             return
         }
 
-        if (!serverDir.exists()) serverDir.mkdirs()
+        // ── Pre-flight: server.jar ────────────────────────────────────────────
+        val serverJar = File(serverDir, "server.jar")
+        if (!serverJar.exists()) {
+            val msg = buildString {
+                appendLine("server.jar not found.")
+                appendLine()
+                appendLine("Path: ${serverJar.absolutePath}")
+                appendLine()
+                appendLine("The download may have failed or is still in progress.")
+                appendLine("Check the server's status on the home screen.")
+                appendLine("If it shows STOPPED (not DOWNLOADING), try deleting this server")
+                appendLine("and creating it again.")
+            }
+            Log.e(TAG, "[$serverId] $msg")
+            manager.emitError(serverId, msg)
+            serverProfileDao.updateStatus(serverId, ServerStatus.CRASHED)
+            return
+        }
+
+        // ── Ensure server directory exists before touching any files ─────────
+        if (!serverDir.exists() && !serverDir.mkdirs()) {
+            val msg = "Could not create server directory.\nPath: ${serverDir.absolutePath}\n\nCheck available storage space."
+            Log.e(TAG, "[$serverId] $msg")
+            manager.emitError(serverId, msg)
+            serverProfileDao.updateStatus(serverId, ServerStatus.CRASHED)
+            return
+        }
+
+        // ── Pre-flight: eula.txt ──────────────────────────────────────────────
+        val eulaFile = File(serverDir, "eula.txt")
+        if (!eulaFile.exists()) {
+            eulaFile.writeText("# EULA accepted via PocketCraft\neula=true\n")
+        }
 
         manager.startServer(serverId, javaBinary, serverDir, ramMb, customStartCommand)
     }
@@ -245,7 +293,7 @@ class ServerForegroundService : Service() {
         )
 
         val lockLabel = if (isLocked) "Unlock" else "Lock"
-        val title = if (isLocked) "PocketCraft (Locked)" else "PocketCraft"
+        val title = if (isLocked) "PocketCraft 🔒" else "PocketCraft"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_server_notification)

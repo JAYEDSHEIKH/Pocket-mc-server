@@ -2,8 +2,11 @@ package com.pocketcraft.app.core.process
 
 import android.util.Log
 import com.pocketcraft.app.data.ServerStatus
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -11,6 +14,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Singleton registry of all running server processes.
  * Access via [ServerProcessManager.instance].
+ *
+ * Also acts as the central error-event bus — anything that detects a
+ * server problem (missing JRE, bad jar, crash) emits via [emitError]
+ * so the UI can show a detailed dialog to the user.
  */
 class ServerProcessManager private constructor() {
 
@@ -29,6 +36,20 @@ class ServerProcessManager private constructor() {
 
     private val _allStatuses = MutableStateFlow<Map<String, ServerStatus>>(emptyMap())
     val allStatuses: StateFlow<Map<String, ServerStatus>> = _allStatuses.asStateFlow()
+
+    /**
+     * Error events emitted when a server fails to start or crashes with a known cause.
+     * Each pair is (serverId, human-readable error message).
+     * The UI should observe this and show an [AppError] dialog.
+     */
+    private val _errorEvents = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 20)
+    val errorEvents: SharedFlow<Pair<String, String>> = _errorEvents.asSharedFlow()
+
+    /** Emits an error event for a server — call from ForegroundService or ProcessManager. */
+    fun emitError(serverId: String, message: String) {
+        _errorEvents.tryEmit(serverId to message)
+        Log.e(TAG, "[$serverId] Error event: $message")
+    }
 
     fun startServer(
         serverId: String,
@@ -93,9 +114,18 @@ class ServerProcessManager private constructor() {
         )
 
     private fun updateStatus(serverId: String, status: ServerStatus) {
+        // Capture the error BEFORE removing the process from the map
+        if (status == ServerStatus.CRASHED) {
+            val err = processes[serverId]?.lastError
+            if (!err.isNullOrBlank()) {
+                _errorEvents.tryEmit(serverId to err)
+            }
+        }
+
         if (status == ServerStatus.STOPPED || status == ServerStatus.CRASHED) {
             processes.remove(serverId)
         }
+
         _allStatuses.value = _allStatuses.value.toMutableMap().also { it[serverId] = status }
         Log.d(TAG, "[$serverId] Status → $status")
     }

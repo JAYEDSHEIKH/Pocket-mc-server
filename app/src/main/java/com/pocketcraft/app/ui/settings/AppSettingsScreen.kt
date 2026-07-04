@@ -1,5 +1,6 @@
 package com.pocketcraft.app.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,10 @@ fun AppSettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val themeMode by AppPrefs.themeMode.collectAsStateWithLifecycle()
+    val stopTimeout by AppPrefs.stopTimeoutSeconds.collectAsStateWithLifecycle()
+    val consoleMaxLines by AppPrefs.consoleMaxLines.collectAsStateWithLifecycle()
+    val autoScroll by AppPrefs.autoScrollConsole.collectAsStateWithLifecycle()
+    val keepScreenOn by AppPrefs.keepScreenOn.collectAsStateWithLifecycle()
 
     if (uiState.isReextractingJre) {
         ProgressDialog(title = "Re-extracting JRE", message = "Extracting bundled Java 21 from APK assets…")
@@ -66,9 +71,7 @@ fun AppSettingsScreen(
             // ── Appearance ────────────────────────────────────────────────────
             SectionHeader("Appearance")
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
                     ThemeModeItem(
                         label = "Follow system",
@@ -95,26 +98,161 @@ fun AppSettingsScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // ── Runtime ───────────────────────────────────────────────────────
-            SectionHeader("Runtime")
+            // ── Console ───────────────────────────────────────────────────────
+            SectionHeader("Console")
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Auto-scroll toggle
+                    ListItem(
+                        headlineContent = { Text("Auto-scroll to latest") },
+                        supportingContent = { Text("Automatically scroll to the newest log line") },
+                        leadingContent = {
+                            Icon(Icons.Default.VerticalAlignBottom, null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = autoScroll,
+                                onCheckedChange = { AppPrefs.setAutoScrollConsole(it) }
+                            )
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // Console line count
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Max console lines", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "$consoleMaxLines lines",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = consoleMaxLines.toFloat(),
+                            onValueChange = { AppPrefs.setConsoleMaxLines(it.toInt()) },
+                            valueRange = 500f..10000f,
+                            steps = 18,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "Higher values use more memory but preserve more history.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Server behaviour ──────────────────────────────────────────────
+            SectionHeader("Server Behaviour")
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Keep screen on
+                    ListItem(
+                        headlineContent = { Text("Keep screen on while running") },
+                        supportingContent = { Text("Prevents the screen from sleeping when a server is active") },
+                        leadingContent = {
+                            Icon(Icons.Default.Brightness7, null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = keepScreenOn,
+                                onCheckedChange = { AppPrefs.setKeepScreenOn(it) }
+                            )
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // Stop timeout
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Graceful stop timeout", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${stopTimeout}s",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = stopTimeout.toFloat(),
+                            onValueChange = { AppPrefs.setStopTimeout(it.toInt()) },
+                            valueRange = 5f..120f,
+                            steps = 22,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "How long to wait for the server to save and stop cleanly before force-killing it.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Storage ───────────────────────────────────────────────────────
+            SectionHeader("Storage")
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 ListItem(
-                    headlineContent = { Text("Re-extract Java Runtime") },
-                    supportingContent = { Text("Fixes issues if the bundled JRE is corrupted") },
+                    headlineContent = { Text("Server data location") },
+                    supportingContent = { Text(viewModel.storageDisplayPath()) },
                     leadingContent = {
-                        Icon(Icons.Default.Refresh, contentDescription = null,
+                        Icon(Icons.Default.FolderOpen, null,
                             tint = MaterialTheme.colorScheme.primary)
-                    },
-                    trailingContent = {
-                        OutlinedButton(
-                            onClick = viewModel::reextractJre,
-                            enabled = !uiState.isReextractingJre
-                        ) { Text("Re-extract") }
                     }
                 )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Runtime ───────────────────────────────────────────────────────
+            SectionHeader("Java Runtime (JRE)")
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("JRE Status") },
+                        supportingContent = { Text(uiState.jreStatus) },
+                        leadingContent = {
+                            Icon(
+                                if (uiState.jrePresent) Icons.Default.CheckCircle else Icons.Default.Error,
+                                contentDescription = null,
+                                tint = if (uiState.jrePresent) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.error
+                            )
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ListItem(
+                        headlineContent = { Text("Re-extract Java Runtime") },
+                        supportingContent = { Text("Fixes issues if the bundled JRE is corrupted or missing") },
+                        leadingContent = {
+                            Icon(Icons.Default.Refresh, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            OutlinedButton(
+                                onClick = viewModel::reextractJre,
+                                enabled = !uiState.isReextractingJre
+                            ) { Text("Re-extract") }
+                        }
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -122,27 +260,38 @@ fun AppSettingsScreen(
             // ── About ─────────────────────────────────────────────────────────
             SectionHeader("About")
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                ListItem(
-                    headlineContent = { Text("PocketCraft") },
-                    supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}") },
-                    leadingContent = {
-                        Icon(Icons.Default.Info, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary)
-                    }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                ListItem(
-                    headlineContent = { Text("Minecraft Java Edition Server") },
-                    supportingContent = { Text("Powered by PaperMC — running on-device via bundled OpenJDK 21") },
-                    leadingContent = {
-                        Icon(Icons.Default.Storage, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary)
-                    }
-                )
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("PocketCraft") },
+                        supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}") },
+                        leadingContent = {
+                            Icon(Icons.Default.Info, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ListItem(
+                        headlineContent = { Text("Powered by PaperMC") },
+                        supportingContent = { Text("Running on-device via bundled OpenJDK 21 (aarch64)") },
+                        leadingContent = {
+                            Icon(Icons.Default.Storage, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary)
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ListItem(
+                        headlineContent = { Text("Distribution") },
+                        supportingContent = { Text("APK via GitHub Releases (not Play Store — this app runs a live JVM)") },
+                        leadingContent = {
+                            Icon(Icons.Default.Download, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary)
+                        }
+                    )
+                }
             }
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -177,10 +326,6 @@ private fun ThemeModeItem(
                 )
             }
         },
-        modifier = Modifier.clickableIf(true, onClick)
+        modifier = Modifier.clickable(onClick = onClick)
     )
 }
-
-// Extension to avoid importing clickable separately
-private fun Modifier.clickableIf(enabled: Boolean, onClick: () -> Unit): Modifier =
-    if (enabled) this.then(Modifier) else this

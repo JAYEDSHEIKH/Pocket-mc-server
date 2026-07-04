@@ -23,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pocketcraft.app.AppPrefs
 import com.pocketcraft.app.data.ServerStatus
 import com.pocketcraft.app.ui.theme.*
 import kotlinx.coroutines.launch
@@ -39,6 +41,7 @@ fun ConsoleTab(
     var command by remember { mutableStateOf("") }
     val commandHistory = remember { mutableStateListOf<String>() }
     var historyIndex by remember { mutableIntStateOf(-1) }
+    val autoScroll by AppPrefs.autoScrollConsole.collectAsStateWithLifecycle()
 
     // Track whether user has scrolled up (to show "jump to latest" button)
     val isScrolledToBottom by remember {
@@ -48,9 +51,9 @@ fun ConsoleTab(
         }
     }
 
-    // Auto-scroll to bottom when new lines arrive (if already at bottom)
+    // Auto-scroll to bottom when new lines arrive (if already at bottom and pref enabled)
     LaunchedEffect(lines.size) {
-        if (isScrolledToBottom && lines.isNotEmpty()) {
+        if (autoScroll && isScrolledToBottom && lines.isNotEmpty()) {
             listState.animateScrollToItem(lines.size - 1)
         }
     }

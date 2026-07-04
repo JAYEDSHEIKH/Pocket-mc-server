@@ -30,6 +30,12 @@ class JreInstaller @Inject constructor(
 
     private val jreRoot: File get() = storageManager.jreDir
 
+    /**
+     * Checks whether the JRE has already been extracted without triggering extraction.
+     * Returns the binary file if present, null otherwise.  Used by Settings to show JRE status.
+     */
+    fun findExistingBinary(): File? = if (isAlreadyExtracted()) findJavaBinary() else null
+
     /** Returns the File for the java binary, or null if extraction fails. */
     suspend fun getJavaBinary(): File? = withContext(Dispatchers.IO) {
         if (isAlreadyExtracted()) {

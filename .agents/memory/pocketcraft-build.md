@@ -1,44 +1,34 @@
 ---
 name: PocketCraft build notes
-description: How builds work — no Android SDK in Replit, CI via GitHub Actions, local setup scripts.
+description: How to build PocketCraft, CI workflow, JRE bundling, and local dev limitations.
 ---
 
-# PocketCraft Build Notes
-
 ## No Android SDK in Replit
-The Android SDK cannot be installed in Replit's default environment (disk space + container limits). **All APK builds run through GitHub Actions CI.**
+- Replit cannot compile the APK. All build output is from GitHub Actions.
+- Code changes are committed to GitHub; CI builds and uploads the APK as an artifact.
 
-## Primary build path: GitHub Actions
-`.github/workflows/build.yml` triggers on push to `main` or `develop`:
-1. Sets up JDK 17 (Temurin) for Gradle
-2. Sets up Android SDK via `android-actions/setup-android@v3`
-3. Downloads the aarch64 JRE asset dynamically via Adoptium API (fallback: pinned Azul Zulu URL)
-4. Runs `./gradlew assembleDebug`
-5. Uploads `PocketCraft-debug-N.apk` as a downloadable artifact (retained 30 days)
+## GitHub Actions CI (`.github/workflows/build.yml`)
+- Triggers on push to main/develop/master and on workflow_dispatch
+- Steps:
+  1. Set up JDK 17 (for Gradle — not the bundled server JRE)
+  2. Cache Gradle packages
+  3. Download OpenJDK 21 aarch64 JRE from Adoptium API (`/v3/assets/latest/21/jdk?architecture=aarch64&image_type=jre&os=linux&vendor=eclipse`)
+  4. Copy tarball to `app/src/main/assets/jre/aarch64-jdk21.tar.gz`
+  5. `./gradlew assembleDebug`
+  6. Upload APK artifact named `PocketCraft-debug-{run_number}.apk` (retention 30 days)
+- The Adoptium API URL is stable — returns the latest JDK 21 release, filtered to linux/aarch64/jre/tarball
 
-## Local build path: scripts/install-all.sh
-For local/Replit builds when the Android SDK is needed:
-- `bash scripts/install-all.sh` — installs everything + builds APK
-- `bash scripts/install-all.sh --no-build` — setup only, skip Gradle
-- `bash scripts/install-all.sh --ndk` — also installs NDK (~2 GB)
+## Getting a debug APK
+1. Push any change to main
+2. Go to repo Actions → latest run → Artifacts section
+3. Download `PocketCraft-debug-N.apk`
+4. Enable "Install from unknown sources" on your Android device and install
 
-Requires Java 17+ on PATH. In Replit: `.replit → [nix] packages` must include `jdk21_headless`.
+## Local setup (if you had Android Studio)
+- Run `scripts/install-all.sh` to set up local toolchain
+- The JRE asset must be manually downloaded and placed at `app/src/main/assets/jre/aarch64-jdk21.tar.gz`
+- Use Adoptium for the aarch64 JRE (Azul Zulu URLs go stale)
 
-## JRE asset download strategy
-The CI workflow and `install-all.sh` both:
-1. Try Adoptium (Eclipse Temurin) JSON API: `https://api.adoptium.net/v3/assets/latest/21/jre?architecture=aarch64&image_type=jre&jvm_impl=hotspot&os=linux&vendor=eclipse`
-2. Fall back to a pinned Azul Zulu URL: `https://cdn.azul.com/zulu/bin/zulu21.42.19-ca-jre21.0.7-linux_aarch64.tar.gz`
-
-**Why:** Azul Zulu CDN URLs are version-specific and go stale when a new build is released. Adoptium API always returns the current LTS.
-
-## Replit .replit Nix packages
-Must include: `jdk21_headless`, `curl`, `unzip`, `python3`
-- `jdk21_headless` provides Java 21 for Gradle (AGP 8.x requires Java 17+)
-- `python3` is needed by the JRE URL discovery script in install-all.sh and build.yml
-- After changing Nix packages, reopen the Shell for the new environment to load
-
-## Gradle / AGP versions
-- AGP: 8.6.1 (requires Gradle 8.7+)
-- Gradle: 8.9 (set in `gradle/wrapper/gradle-wrapper.properties`)
-- Kotlin: 2.0.21
-- KSP: 2.0.21-1.0.27 (must match Kotlin version)
+## Distribution
+- Direct APK / GitHub Releases (not Play Store — app executes downloaded native code + JVM at runtime)
+- minSdk 26, arm64-v8a ABI only

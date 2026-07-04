@@ -11,10 +11,12 @@ import com.pocketcraft.app.core.downloader.PaperApi
 import com.pocketcraft.app.core.downloader.latestStable
 import com.pocketcraft.app.core.downloader.serverJarUrl
 import com.pocketcraft.app.core.downloader.stableVersionsSorted
+import com.pocketcraft.app.core.storage.StorageManager
 import com.pocketcraft.app.data.LoaderType
 import com.pocketcraft.app.data.ServerProfile
 import com.pocketcraft.app.data.ServerProfileDao
 import com.pocketcraft.app.data.ServerStatus
+import com.pocketcraft.app.ui.components.AppError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -37,14 +39,16 @@ data class CreateServerUiState(
     val selectedVersion: String = "",
     val ramMb: Int = 1024,
     val eulaAccepted: Boolean = false,
-    val isCreating: Boolean = false
+    val isCreating: Boolean = false,
+    val creationError: AppError? = null
 )
 
 @HiltViewModel
 class CreateServerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val paperApi: PaperApi,
-    private val serverProfileDao: ServerProfileDao
+    private val serverProfileDao: ServerProfileDao,
+    private val storageManager: StorageManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CreateServerUiState())
@@ -102,6 +106,7 @@ class CreateServerViewModel @Inject constructor(
     fun updateRam(mb: Int) = _uiState.update { it.copy(ramMb = mb) }
     fun updateEula(accepted: Boolean) = _uiState.update { it.copy(eulaAccepted = accepted) }
     fun retryFetchVersions() = fetchVersions()
+    fun clearCreationError() = _uiState.update { it.copy(creationError = null) }
 
     // ── API calls ─────────────────────────────────────────────────────────────
 
@@ -110,7 +115,6 @@ class CreateServerViewModel @Inject constructor(
             _uiState.update { it.copy(versionState = VersionLoadState.Loading) }
             runCatching {
                 val project = paperApi.getProject()
-                // Stable versions, newest first (numeric sort so 1.21 > 1.9)
                 project.stableVersionsSorted()
             }.onSuccess { versions ->
                 _uiState.update {
@@ -122,7 +126,9 @@ class CreateServerViewModel @Inject constructor(
             }.onFailure { e ->
                 Log.e("CreateServerVM", "Failed to fetch versions", e)
                 _uiState.update {
-                    it.copy(versionState = VersionLoadState.Error(e.message ?: "Unknown error"))
+                    it.copy(versionState = VersionLoadState.Error(
+                        "Could not load Minecraft versions.\n${e.message ?: "Network error"}\n\nCheck your internet connection and try again."
+                    ))
                 }
             }
         }
@@ -135,16 +141,31 @@ class CreateServerViewModel @Inject constructor(
         if (!state.eulaAccepted || state.isCreating) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isCreating = true) }
+            _uiState.update { it.copy(isCreating = true, creationError = null) }
 
             runCatching {
                 // Fetch the latest stable build for the chosen version
-                val builds = paperApi.getBuilds(state.selectedVersion)
-                val build = builds.latestStable()
-                    ?: throw IllegalStateException("No builds found for ${state.selectedVersion}")
-                val downloadUrl = build.serverJarUrl()
+                val builds = runCatching { paperApi.getBuilds(state.selectedVersion) }
+                    .getOrElse { e ->
+                        throw IllegalStateException(
+                            "Could not fetch build info for Minecraft ${state.selectedVersion}.\n\n${e.message}\n\nCheck your internet connection.",
+                            e
+                        )
+                    }
 
-                // Insert profile into DB
+                val build = builds.latestStable()
+                    ?: throw IllegalStateException(
+                        "No stable builds found for Minecraft ${state.selectedVersion}.\n\nTry a different version."
+                    )
+                val downloadUrl = runCatching { build.serverJarUrl() }
+                    .getOrElse { e ->
+                        throw IllegalStateException(
+                            "Could not determine the download URL for the server jar.\n\n${e.message}",
+                            e
+                        )
+                    }
+
+                // Insert profile into DB first so it gets an ID
                 val profile = ServerProfile(
                     name = state.name,
                     loaderType = state.loaderType,
@@ -155,9 +176,8 @@ class CreateServerViewModel @Inject constructor(
                 )
                 serverProfileDao.insert(profile)
 
-                // Prepare server directory
-                val serverDir = File(context.filesDir, "servers/${profile.id}")
-                serverDir.mkdirs()
+                // Prepare server directory using StorageManager (consistent with all other code paths)
+                val serverDir = storageManager.createServerDirs(profile.id)
 
                 // Write eula.txt (Mojang requires this before the server will start)
                 File(serverDir, "eula.txt").writeText(
@@ -167,8 +187,7 @@ class CreateServerViewModel @Inject constructor(
 
                 // Write default server.properties.
                 // RCON is enabled with a randomly generated per-server password
-                // so Phase 2 (Players tab) can connect without user configuration.
-                // The password is stored only in server.properties inside app-private storage.
+                // so the Players tab (Phase 2) can connect without user configuration.
                 val rconPassword = generateRconPassword()
                 File(serverDir, "server.properties").writeText(
                     "# Minecraft server properties — generated by PocketCraft\n" +
@@ -205,13 +224,23 @@ class CreateServerViewModel @Inject constructor(
 
                 WorkManager.getInstance(context).enqueue(work)
                 profile.id
+
             }.onSuccess { serverId ->
                 _uiState.update { it.copy(isCreating = false) }
-                // Navigation is handled by the screen observing a separate one-shot event
                 _createdServerId.value = serverId
+
             }.onFailure { e ->
                 Log.e("CreateServerVM", "Failed to create server", e)
-                _uiState.update { it.copy(isCreating = false) }
+                _uiState.update {
+                    it.copy(
+                        isCreating = false,
+                        creationError = AppError(
+                            title = "Server Creation Failed",
+                            message = e.message ?: "An unexpected error occurred while creating the server.",
+                            detail = e.stackTraceToString()
+                        )
+                    )
+                }
             }
         }
     }

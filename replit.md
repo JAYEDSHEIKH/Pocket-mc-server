@@ -40,10 +40,31 @@ The CI workflow automatically downloads the Azul Zulu OpenJDK 21 aarch64 JRE and
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| 1 | ✅ In progress | Paper only: create → download → start → console → stop |
+| 1 | ✅ Complete | Paper only: create → download → start → console → stop, file manager, settings |
 | 2 | ⬜ | Full Material 3 UI pass, server.properties editor, Players tab (RCON) |
-| 3 | ⬜ | Fabric support, Files tab, Plugins/Mods tab (Modrinth) |
+| 3 | ⬜ | Fabric support, Plugins/Mods tab (Modrinth) |
 | 4 | ⬜ | Multi-server dashboard, Network tab + tunnel, backups, onboarding, haptics |
+
+## Important: Getting a working APK
+
+The app **requires the JRE asset to be bundled at build time**. This is done automatically by GitHub Actions:
+
+1. Push to `main` or `develop`
+2. Go to **Actions → latest run → Artifacts → PocketCraft-debug-N.apk**
+
+Building locally without CI produces an APK that will crash when starting servers (JRE not found).
+
+## What was built / fixed (Phase 1 overhaul)
+
+- **GitHub Actions CI** (`.github/workflows/build.yml`) — downloads OpenJDK 21 aarch64 from Adoptium and bundles it as the asset before building the APK
+- **Error surfacing** — server crashes now emit detailed pop-up dialogs explaining the exact cause (missing JRE, missing jar, directory error, network error)
+- **Server create errors** — creation failures now show an error dialog with expandable stack trace and close ×
+- **Storage consistency** — `CreateServerViewModel` now uses `StorageManager.createServerDirs()` so all code paths agree on where server files live; external app-specific storage with legacy-path migration
+- **ServerProcessManager** — added `errorEvents` SharedFlow; service and process both emit structured error messages to the UI
+- **Configurable settings** — stop timeout (5–120 s), console max lines (500–10 000), auto-scroll toggle, keep-screen-on toggle; all wired into runtime
+- **JRE status in App Settings** — shows whether JRE is installed with full path; re-extract button explains the CI-only constraint
+- **Storage path display** in App Settings
+- **Service startup pre-flight** — ensures server directory exists before writing eula.txt / checking server.jar; each failure emits a human-readable error event
 
 ## Key files
 
