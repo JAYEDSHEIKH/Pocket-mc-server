@@ -17,6 +17,10 @@ tools/
 # Build output
 output/
 
+# JRE asset — downloaded at build time by install-all.sh / GitHub Actions CI.
+# Never commit this; it is ~50 MB and regenerated on every clean build.
+app/src/main/assets/jre/
+
 # IntelliJ / Android Studio
 *.iml
 .idea/
