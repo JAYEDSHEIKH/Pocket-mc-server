@@ -1,2 +1,2 @@
-- [PocketCraft architecture](pocketcraft-arch.md) — key design decisions: singleton ServerProcessManager bridges ForegroundService ↔ ViewModels; status persistence via collectStatusUpdates() flow in service.
-- [PocketCraft build notes](pocketcraft-build.md) — no Android SDK in Replit; CI-only builds via GitHub Actions + gradle/actions/setup-gradle@v4; wrapper JAR committed from gradle/gradle GitHub repo.
+- [PocketCraft architecture](pocketcraft-arch.md) — singleton ServerProcessManager bridges ForegroundService ↔ ViewModels; API 34 startForeground fix; Paper Fill v3 real response shapes; RCON password security.
+- [PocketCraft build notes](pocketcraft-build.md) — no Android SDK in Replit; CI via GitHub Actions; install-all.sh for local setup; Adoptium API for JRE URL (Azul Zulu URLs go stale).

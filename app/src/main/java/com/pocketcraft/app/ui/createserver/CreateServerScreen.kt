@@ -351,12 +351,20 @@ private fun RamStep(state: CreateServerUiState, viewModel: CreateServerViewModel
                 }
             }
 
-            // Slider — step 512 MB, range 512–max(device RAM, 8 GB)
+            // Slider — discrete 512 MB steps, range 512 MB up to min(deviceRam, 8 GB).
+            // Compose `steps` = number of *intermediate* positions (not counting endpoints),
+            // so total positions = steps + 2.  We want positions at 512, 1024, ..., maxRam:
+            // total positions = (maxRam - 512) / 512 + 1  →  intermediate = total - 2.
             val maxRam = minOf(deviceRam, 8192)
-            val steps = ((maxRam - 512) / 512).coerceAtLeast(0)
+            val totalPositions = ((maxRam - 512) / 512) + 1
+            val steps = (totalPositions - 2).coerceAtLeast(0)
             Slider(
                 value = state.ramMb.toFloat(),
-                onValueChange = { viewModel.updateRam(it.roundToInt()) },
+                onValueChange = {
+                    // Snap to nearest 512 MB boundary
+                    val snapped = ((it / 512f).roundToInt() * 512).coerceIn(512, maxRam)
+                    viewModel.updateRam(snapped)
+                },
                 valueRange = 512f..maxRam.toFloat(),
                 steps = steps,
                 modifier = Modifier.fillMaxWidth()

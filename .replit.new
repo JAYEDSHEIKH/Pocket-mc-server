@@ -1,6 +1,0 @@
-[agent]
-expertMode = true
-
-[nix]
-channel = "stable-24_05"
-packages = ["jdk21_headless", "unzip", "curl", "which"]

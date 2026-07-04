@@ -46,7 +46,15 @@ jobs:
       - name: Download aarch64 JDK 21 asset
         run: |
           mkdir -p app/src/main/assets/jre
-          JRE_URL="https://cdn.azul.com/zulu/bin/zulu21.38.21-ca-jre21.0.5-linux_aarch64.tar.gz"
+          # Try Adoptium (Eclipse Temurin) API first — always returns the current LTS release.
+          JRE_URL=$(curl -fsSL \
+            "https://api.adoptium.net/v3/assets/latest/21/jre?architecture=aarch64&image_type=jre&jvm_impl=hotspot&os=linux&vendor=eclipse" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['binary']['package']['link'])" 2>/dev/null || true)
+          # Fallback: pinned Azul Zulu 21 URL
+          if [ -z "$JRE_URL" ]; then
+            JRE_URL="https://cdn.azul.com/zulu/bin/zulu21.42.19-ca-jre21.0.7-linux_aarch64.tar.gz"
+          fi
+          echo "Downloading JRE from: $JRE_URL"
           curl -L --retry 3 -o app/src/main/assets/jre/aarch64-jdk21.tar.gz "$JRE_URL"
           echo "JRE asset: $(du -sh app/src/main/assets/jre/aarch64-jdk21.tar.gz | cut -f1)"
 

@@ -1,0 +1,212 @@
+PROJECT: PocketCraft — Android Minecraft Java Server Host
+(rename freely — avoid making "Minecraft" part of the actual app name/logo for trademark reasons; using the word descriptively in the store description is fine)
+
+═══════════════════════════════════════
+1. VISION
+═══════════════════════════════════════
+Build a native Android app that lets a user create, configure, run, and
+manage Minecraft: Java Edition servers (PaperMC and Fabric) entirely on
+their phone — no PC, no root. Think "a pocket-sized Pterodactyl panel"
+combined with the same on-device-JVM trick Termux uses to run java on
+Android. This is a SERVER host, not a game client — no rendering, no
+OpenGL, no touch controls. Just process management, file management,
+and a clean control panel UI.
+
+The app never bundles Minecraft/Paper/Fabric jars itself. Everything is
+fetched live from official sources at runtime:
+- PaperMC → Fill API: https://fill.papermc.io/v3/projects/paper/versions/{mc_version}/builds
+  (the old api.papermc.io/v2 endpoint is retired — do not use it)
+- Fabric  → Meta API: https://meta.fabricmc.net/v2/versions/loader/{mc_version}
+  plus the Fabric installer jar run headless with -mcversion / -loader /
+  -downloadMinecraft / server flags
+
+═══════════════════════════════════════
+2. TECH STACK (mandatory)
+═══════════════════════════════════════
+- Kotlin, Jetpack Compose, Material 3 (custom theme, not default purple)
+- MVVM + Kotlin Coroutines/Flow
+- Room DB for server profiles + settings
+- Retrofit/OkHttp for the PaperMC + Fabric + Modrinth APIs
+- WorkManager for large background jar downloads (survive app backgrounding)
+- One bundled aarch64 OpenJDK 21 build shipped as a raw asset, extracted
+  to app-private internal storage on first run. This is the real JVM
+  that executes server jars — Android's ART runtime is never involved.
+- minSdk 26, targetSdk latest stable, arm64-v8a as the primary ABI
+  (covers the vast majority of real devices; don't worry about x86_64)
+- No root required anywhere in the app
+
+═══════════════════════════════════════
+3. UI/UX — THIS MUST LOOK PREMIUM, NOT LIKE A SHELL SCRIPT WITH BUTTONS
+═══════════════════════════════════════
+Design direction: a "control room" feel — calm, confident Material 3
+surfaces for management screens, contrasted with a monospace, slightly
+terminal-flavored console screen for logs. Dark theme is the default
+and should look intentional, not just an inverted light theme.
+
+Required UI details:
+- Custom seed color + full Material 3 dynamic color theme (not stock)
+- Home screen = a list of server cards, each showing: name, loader
+  badge (Paper/Fabric), a pulsing colored status dot (green=running,
+  gray=stopped, amber=starting/stopping, red=crashed), live RAM/CPU
+  mini-sparkline, and a one-tap start/stop button
+- Floating action button → "Create Server" wizard (multi-step, not one
+  giant form): 1) name, 2) loader type, 3) Minecraft version (fetched
+  live from the API, with a loading skeleton, not a blank spinner),
+  4) RAM allocation slider with a plain-language warning if it exceeds
+  a safe % of the device's total RAM, 5) confirm & create
+- Server Detail screen with tabs: Console, Players, Files, Plugins/Mods,
+  Properties, Backups, Network
+  - Console tab: monospace log viewer, auto-scroll with a "jump to
+    latest" pill when scrolled up, color-coded log levels (INFO/WARN/
+    ERROR/join-leave events highlighted), a command input bar at the
+    bottom with history (up-arrow to recall previous commands)
+  - Players tab: list of currently online players (via RCON or log
+    parsing) with quick kick/ban/op actions
+  - Files tab: simple file browser scoped to that server's directory —
+    view/edit server.properties as a FORM with labeled fields and
+    helper text, not a raw text file, plus a raw-text fallback for
+    power users
+  - Plugins/Mods tab: search + install directly from Modrinth's API
+    (filtered to the correct loader and Minecraft version so
+    incompatible files can't be installed by mistake)
+  - Network tab: shows LAN IP:port for local play, and — if the user
+    enables a tunnel — the public join address plus a QR code so a
+    friend can scan it from their phone
+- Empty states need real illustrations/icons and a short helpful
+  sentence, never a blank screen
+- Use haptic feedback on start/stop actions and destructive
+  confirmations (delete server, delete world)
+- Smooth Compose transitions between screens; nothing should feel
+  like a jump-cut
+
+═══════════════════════════════════════
+4. FOLDER / PACKAGE STRUCTURE
+═══════════════════════════════════════
+app/
+├── src/main/
+│   ├── java/com/you/pocketcraft/
+│   │   ├── core/
+│   │   │   ├── jre/JreInstaller.kt            (extracts bundled JDK once)
+│   │   │   ├── process/ServerProcess.kt       (ProcessBuilder wrapper)
+│   │   │   ├── process/ServerForegroundService.kt
+│   │   │   ├── downloader/PaperApi.kt         (Retrofit -> fill.papermc.io)
+│   │   │   ├── downloader/FabricApi.kt        (Retrofit -> meta.fabricmc.net)
+│   │   │   ├── downloader/ModrinthApi.kt
+│   │   │   ├── rcon/RconClient.kt             (Source RCON protocol impl)
+│   │   │   └── tunnel/PlayitAgent.kt          (optional bundled binary)
+│   │   ├── data/
+│   │   │   ├── ServerProfile.kt               (Room entity)
+│   │   │   ├── ServerProfileDao.kt
+│   │   │   └── AppDatabase.kt
+│   │   ├── ui/
+│   │   │   ├── theme/                         (Color.kt, Type.kt, Theme.kt)
+│   │   │   ├── home/
+│   │   │   ├── createserver/
+│   │   │   ├── serverdetail/
+│   │   │   │   ├── console/
+│   │   │   │   ├── players/
+│   │   │   │   ├── files/
+│   │   │   │   ├── pluginsmods/
+│   │   │   │   ├── properties/
+│   │   │   │   └── network/
+│   │   │   └── settings/
+│   │   └── MainActivity.kt
+│   ├── assets/
+│   │   └── jre/aarch64-jdk21.tar.xz
+│   └── AndroidManifest.xml
+└── build.gradle.kts
+
+Per-server runtime data (app-private storage, not shared/external):
+files/servers/<server-id>/
+├── server.jar
+├── eula.txt
+├── server.properties
+├── world/
+├── plugins/        (PaperMC only)
+├── mods/           (Fabric only)
+└── logs/latest.log
+
+═══════════════════════════════════════
+5. SERVER LIFECYCLE — HOW IT ACTUALLY RUNS
+═══════════════════════════════════════
+1. User finishes the create wizard → app fetches the correct build/jar
+   URL from the Paper Fill API or Fabric Meta API and downloads it via
+   WorkManager into that server's folder.
+2. App writes eula.txt (only after the user explicitly accepts Mojang's
+   EULA in-app — required, not optional) and a server.properties
+   generated from the form defaults.
+3. Starting a server = ServerForegroundService launches
+   `java -Xmx<N>G -Xms<N>G -jar server.jar nogui` as a child process
+   with working directory set to that server's folder, and a
+   persistent notification (Android will kill background JVMs without
+   this — it is not optional).
+4. stdout/stderr are piped into a bounded ring buffer (last ~2000
+   lines) feeding the Console tab, and also appended to logs/latest.log
+   for crash diagnostics.
+5. On app or service restart, reconcile state: if the DB says a server
+   was "running" but no matching process exists, mark it "stopped" —
+   never leave a server stuck in a fake "starting" state.
+6. Stopping = send "stop" to stdin first (graceful shutdown, saves the
+   world), fall back to process.destroy() after a timeout.
+7. RCON (enable-rcon=true in server.properties) powers the Players tab
+   and remote command execution without scraping logs.
+
+═══════════════════════════════════════
+6. PERMISSIONS / MANIFEST
+═══════════════════════════════════════
+- INTERNET
+- FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC (or SPECIAL_USE)
+- POST_NOTIFICATIONS (Android 13+)
+- WAKE_LOCK
+- Request battery-optimization exemption via
+  REQUEST_IGNORE_BATTERY_OPTIMIZATIONS during onboarding, with a plain
+  explanation of why (otherwise the server gets killed in the background)
+- No broad storage permission needed — everything lives in app-private
+  storage; only use Storage Access Framework if adding "export world
+  to Downloads" later
+
+═══════════════════════════════════════
+7. LEGAL / COMPLIANCE GUARDRAILS — FOLLOW THESE
+═══════════════════════════════════════
+- Require explicit EULA acceptance per server before first start,
+  written to eula.txt exactly like vanilla Minecraft does
+- Never embed or redistribute Mojang's copyrighted textures, sounds,
+  or logo — original branding only
+- Because this app downloads and executes native code (a JVM +
+  server jars) at runtime, plan to distribute via direct APK /
+  GitHub Releases rather than the Play Store, where this pattern is
+  commonly restricted — this is the same reason PojavLauncher and
+  Termux aren't on the Play Store
+
+═══════════════════════════════════════
+8. BUILD NOTE — READ BEFORE STARTING
+═══════════════════════════════════════
+The dev environment can edit/organize this code, but it cannot compile
+a signed installable APK itself (no Android SDK/Gradle). Structure the
+project as a completely standard Gradle Android project regardless,
+and add a GitHub Actions workflow so every push to the repo
+automatically builds a downloadable debug APK — no local Android
+Studio required. (Ask me for the workflow YAML — I have it ready.)
+
+═══════════════════════════════════════
+9. IMPLEMENTATION ORDER — DO NOT SKIP AHEAD
+═══════════════════════════════════════
+PHASE 1 (MVP): One server type (Paper only). Create → download →
+start → live console → stop. Ugly-but-functional UI is OK for this
+phase only.
+PHASE 2: Full Material 3 UI pass on everything from Phase 1. Add
+server.properties form editor, Players tab via RCON.
+PHASE 3: Add Fabric support, Files tab, Plugins/Mods tab via Modrinth.
+PHASE 4: Multi-server dashboard polish, Network tab + tunnel
+integration, backups, settings, onboarding flow, animations/haptics
+pass.
+
+After each phase, stop and summarize what was built before continuing.
+
+═══════════════════════════════════════
+10. NON-GOALS (don't build these)
+═══════════════════════════════════════
+- No Bedrock Edition support
+- No Minecraft client/launcher functionality
+- No mod loaders besides Fabric (no Forge/NeoForge/Quilt for v1)
+- No user accounts / cloud sync in v1

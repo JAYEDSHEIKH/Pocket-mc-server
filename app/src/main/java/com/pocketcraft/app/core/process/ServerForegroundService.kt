@@ -3,7 +3,9 @@ package com.pocketcraft.app.core.process
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -71,7 +73,17 @@ class ServerForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Server manager running"))
+        // Android 14+ (API 34) requires the foreground service type to be passed explicitly
+        // when it is declared in the manifest, or the system throws an exception on startup.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("Server manager running"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Server manager running"))
+        }
 
         // Mirror ALL live status changes from the process manager into Room.
         // This is the single authoritative path for DB status persistence.
