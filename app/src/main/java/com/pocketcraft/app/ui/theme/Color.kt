@@ -21,6 +21,7 @@ val TealContainer = Color(0xFF004D44)
 
 // Secondary: Soft blue (labels, secondary actions)
 val Blue200  = Color(0xFF90CAF9)
+val Blue700  = Color(0xFF1565C0)   // medium blue — light-scheme secondary
 val Blue900  = Color(0xFF0D1B2A)
 
 // Tertiary: Amber (warnings, STARTING/STOPPING status)
