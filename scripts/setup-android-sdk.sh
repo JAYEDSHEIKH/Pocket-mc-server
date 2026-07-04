@@ -34,6 +34,7 @@ CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-lin
 SDK_PACKAGES=(
   "platforms;android-35"
   "build-tools;35.0.0"
+  "build-tools;34.0.0"   # AGP 8.5/8.6 may auto-select 34 — pre-cache it
   "platform-tools"
 )
 # NDK (only installed when --ndk flag is passed; ~2 GB download)
