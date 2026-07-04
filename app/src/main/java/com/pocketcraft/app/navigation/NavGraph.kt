@@ -9,10 +9,12 @@ import androidx.navigation.navArgument
 import com.pocketcraft.app.ui.createserver.CreateServerScreen
 import com.pocketcraft.app.ui.home.HomeScreen
 import com.pocketcraft.app.ui.serverdetail.ServerDetailScreen
+import com.pocketcraft.app.ui.settings.AppSettingsScreen
 
 sealed class Screen(val route: String) {
-    data object Home : Screen("home")
+    data object Home         : Screen("home")
     data object CreateServer : Screen("create_server")
+    data object AppSettings  : Screen("app_settings")
     data object ServerDetail : Screen("server/{serverId}") {
         fun createRoute(serverId: String) = "server/$serverId"
     }
@@ -22,16 +24,13 @@ sealed class Screen(val route: String) {
 fun NavGraph() {
     val navController = rememberNavController()
 
-    NavHost(
-        navController = navController,
-        startDestination = Screen.Home.route
-    ) {
+    NavHost(navController = navController, startDestination = Screen.Home.route) {
+
         composable(Screen.Home.route) {
             HomeScreen(
-                onCreateServer = { navController.navigate(Screen.CreateServer.route) },
-                onOpenServer = { serverId ->
-                    navController.navigate(Screen.ServerDetail.createRoute(serverId))
-                }
+                onCreateServer  = { navController.navigate(Screen.CreateServer.route) },
+                onOpenServer    = { serverId -> navController.navigate(Screen.ServerDetail.createRoute(serverId)) },
+                onOpenSettings  = { navController.navigate(Screen.AppSettings.route) }
             )
         }
 
@@ -43,6 +42,10 @@ fun NavGraph() {
                     navController.navigate(Screen.ServerDetail.createRoute(serverId))
                 }
             )
+        }
+
+        composable(Screen.AppSettings.route) {
+            AppSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
 
         composable(

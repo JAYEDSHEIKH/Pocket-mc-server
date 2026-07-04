@@ -24,11 +24,25 @@ interface ServerProfileDao {
     @Query("UPDATE server_profiles SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: ServerStatus)
 
+    @Query("""
+        UPDATE server_profiles
+        SET name = :name, ramMb = :ramMb,
+            customStartCommand = :customStartCommand,
+            serverNotes = :notes
+        WHERE id = :id
+    """)
+    suspend fun updateSettings(
+        id: String,
+        name: String,
+        ramMb: Int,
+        customStartCommand: String?,
+        notes: String
+    )
+
     @Query("UPDATE server_profiles SET eulaAccepted = 1 WHERE id = :id")
     suspend fun markEulaAccepted(id: String)
 
-    /** Called on service restart: any server still marked RUNNING or STARTING
-     *  with no matching live process should be reset to STOPPED. */
+    /** Resets any server that was left stuck in a running/transitioning state. */
     @Query("UPDATE server_profiles SET status = 'STOPPED' WHERE status IN ('RUNNING','STARTING','STOPPING')")
     suspend fun resetStaleRunningStatuses()
 }

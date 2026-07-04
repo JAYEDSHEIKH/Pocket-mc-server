@@ -25,5 +25,14 @@ data class ServerProfile(
     val ramMb: Int,
     val status: ServerStatus = ServerStatus.STOPPED,
     val eulaAccepted: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * Custom JVM flags string.  If null the default G1GC flags are used.
+     * Do NOT include the java binary, -jar, server.jar, or nogui — those
+     * are appended automatically.
+     * Example: "-XX:+UseZGC -Xss4M"
+     */
+    val customStartCommand: String? = null,
+    /** Free-form notes shown in the Settings tab. */
+    val serverNotes: String = ""
 )

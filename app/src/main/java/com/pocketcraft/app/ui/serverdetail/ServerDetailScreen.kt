@@ -1,5 +1,7 @@
 package com.pocketcraft.app.ui.serverdetail
 
+import android.app.ActivityManager
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -9,16 +11,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketcraft.app.data.ServerStatus
+import com.pocketcraft.app.ui.components.ErrorDialog
+import com.pocketcraft.app.ui.components.ProgressDialog
 import com.pocketcraft.app.ui.home.StatusDot
 import com.pocketcraft.app.ui.serverdetail.console.ConsoleTab
+import com.pocketcraft.app.ui.serverdetail.files.FilesTab
+import com.pocketcraft.app.ui.serverdetail.settings.ServerSettingsTab
 
-private val tabs = listOf("Console", "Players", "Files", "Plugins", "Properties", "Backups", "Network")
+private val TAB_LABELS = listOf("Console", "Files", "Settings", "Players", "Plugins", "Backups")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,12 +36,40 @@ fun ServerDetailScreen(
 ) {
     LaunchedEffect(serverId) { viewModel.init(serverId) }
 
-    val profile by viewModel.profile.collectAsStateWithLifecycle()
-    val status by viewModel.liveStatus.collectAsStateWithLifecycle()
-    val consoleLines by viewModel.consoleLines.collectAsStateWithLifecycle()
+    val profile       by viewModel.profile.collectAsStateWithLifecycle()
+    val status        by viewModel.liveStatus.collectAsStateWithLifecycle()
+    val consoleLines  by viewModel.consoleLines.collectAsStateWithLifecycle()
+    val dlProgress    by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val error         by viewModel.error.collectAsStateWithLifecycle()
+    val loading       by viewModel.loading.collectAsStateWithLifecycle()
+
+    val haptic  = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val haptic = LocalHapticFeedback.current
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    // Device RAM for sliders
+    val deviceRamMb = remember {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        (info.totalMem / 1024 / 1024).toInt().coerceAtLeast(1024)
+    }
+    val maxRamMb = minOf(deviceRamMb, 8192)
+
+    // Error / loading dialogs
+    error?.let { ErrorDialog(error = it, onDismiss = viewModel::clearError) }
+    loading?.let { ProgressDialog(title = it.title, message = it.message, progress = it.progress) }
+
+    // Edit dialog
+    if (showEditDialog && profile != null) {
+        EditServerDialog(
+            profile = profile!!,
+            maxRamMb = maxRamMb,
+            onSave = { name, ramMb, cmd, notes -> viewModel.saveSettings(name, ramMb, cmd, notes) },
+            onDismiss = { showEditDialog = false }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -65,27 +100,55 @@ fun ServerDetailScreen(
                     }
                 },
                 actions = {
-                    val isTransitioning = status in listOf(
-                        ServerStatus.STARTING, ServerStatus.STOPPING, ServerStatus.DOWNLOADING
-                    )
-                    if (isTransitioning) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 8.dp).size(24.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        val isRunning = status == ServerStatus.RUNNING
-                        IconButton(onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            if (isRunning) viewModel.stopServer() else viewModel.startServer()
-                        }) {
-                            Icon(
-                                imageVector = if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                                contentDescription = if (isRunning) "Stop" else "Start",
-                                tint = if (isRunning) MaterialTheme.colorScheme.error
-                                       else MaterialTheme.colorScheme.primary
+                    // Download progress bar replaces the start/stop indicator
+                    if (status == ServerStatus.DOWNLOADING) {
+                        val p = dlProgress
+                        if (p != null) {
+                            Column(
+                                modifier = Modifier.padding(end = 12.dp).width(80.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    "${(p * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                LinearProgressIndicator(
+                                    progress = { p },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 8.dp).size(24.dp),
+                                strokeWidth = 2.dp
                             )
                         }
+                    } else {
+                        val isTransitioning = status in listOf(ServerStatus.STARTING, ServerStatus.STOPPING)
+                        if (isTransitioning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 8.dp).size(24.dp), strokeWidth = 2.dp
+                            )
+                        } else {
+                            val isRunning = status == ServerStatus.RUNNING
+                            IconButton(onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (isRunning) viewModel.stopServer() else viewModel.startServer()
+                            }) {
+                                Icon(
+                                    imageVector = if (isRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                    contentDescription = if (isRunning) "Stop" else "Start",
+                                    tint = if (isRunning) MaterialTheme.colorScheme.error
+                                           else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+
+                    // Edit button
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit server")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -102,18 +165,15 @@ fun ServerDetailScreen(
                 contentColor = MaterialTheme.colorScheme.primary,
                 edgePadding = 0.dp
             ) {
-                tabs.forEachIndexed { index, title ->
+                TAB_LABELS.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
                         text = {
                             Text(
-                                title,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (selectedTab == index)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                title, style = MaterialTheme.typography.labelLarge,
+                                color = if (selectedTab == index) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
@@ -127,7 +187,24 @@ fun ServerDetailScreen(
                     serverStatus = status,
                     modifier = Modifier.fillMaxSize()
                 )
-                else -> ComingSoonTab(tabName = tabs[selectedTab], modifier = Modifier.fillMaxSize())
+                1 -> FilesTab(
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize()
+                )
+                2 -> profile?.let { prof ->
+                    ServerSettingsTab(
+                        profile = prof,
+                        liveStatus = status,
+                        maxRamMb = maxRamMb,
+                        viewModel = viewModel,
+                        onServerDeleted = onNavigateBack,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } ?: Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+                else -> ComingSoonTab(
+                    tabName = TAB_LABELS[selectedTab],
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
@@ -141,21 +218,13 @@ private fun ComingSoonTab(tabName: String, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Construction,
-                contentDescription = null,
-                modifier = Modifier.size(56.dp),
-                tint = MaterialTheme.colorScheme.outline
+                imageVector = Icons.Default.Construction, contentDescription = null,
+                modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.outline
             )
-            Text(
-                text = "$tabName — coming soon",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "This tab will be available in a future update.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.outline
-            )
+            Text("$tabName — coming soon", style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("This tab will be available in a future update.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -166,5 +235,5 @@ private fun ServerStatus.label(): String = when (this) {
     ServerStatus.STARTING    -> "Starting…"
     ServerStatus.RUNNING     -> "Running"
     ServerStatus.STOPPING    -> "Stopping…"
-    ServerStatus.CRASHED     -> "Crashed"
+    ServerStatus.CRASHED     -> "Crashed — tap ▶ to retry"
 }

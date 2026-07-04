@@ -12,29 +12,25 @@ import java.io.PrintWriter
 /**
  * Wraps a single running Minecraft server child process.
  *
- * Lifecycle:
- *   start() → process is alive, console lines flow
- *   sendCommand(cmd) → writes to stdin
- *   stop() → sends "stop" to stdin, waits gracefully, then force-kills
- *   The process can also exit on its own (crash), which updates status to CRASHED.
+ * @param customJvmArgs  If non-null these JVM flags replace the built-in defaults.
+ *                       Do NOT include the java binary path, -jar, server.jar, or nogui.
  */
 class ServerProcess(
     val serverId: String,
     private val javaBinary: File,
     private val serverDir: File,
     private val ramMb: Int,
-    /** Callback invoked when the process exits (naturally or via stop()) */
+    private val customJvmArgs: List<String>? = null,
     private val onStatusChange: (String, ServerStatus) -> Unit
 ) {
     companion object {
         private const val TAG = "ServerProcess"
-        private const val CONSOLE_BUFFER = 2_000  // max lines held in memory
+        private const val CONSOLE_BUFFER = 2_000
         private const val STOP_TIMEOUT_MS = 30_000L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Ring-buffer of recent console lines
     private val _consoleLines = MutableSharedFlow<String>(
         replay = CONSOLE_BUFFER,
         extraBufferCapacity = 200
@@ -47,6 +43,10 @@ class ServerProcess(
     private var process: Process? = null
     private var stdin: PrintWriter? = null
 
+    /** Human-readable description of the last failure, for display in error dialogs. */
+    var lastError: String? = null
+        private set
+
     fun start() {
         if (_status.value == ServerStatus.RUNNING || _status.value == ServerStatus.STARTING) return
 
@@ -55,20 +55,37 @@ class ServerProcess(
 
         scope.launch {
             runCatching {
-                val cmd = listOf(
-                    javaBinary.absolutePath,
+                // ── Pre-flight checks ──────────────────────────────────────────
+                val serverJar = File(serverDir, "server.jar")
+                if (!serverJar.exists()) {
+                    throw IllegalStateException(
+                        "server.jar not found.\n" +
+                        "Path: ${serverJar.absolutePath}\n" +
+                        "Make sure the download completed successfully."
+                    )
+                }
+                if (!javaBinary.exists() || !javaBinary.canExecute()) {
+                    throw IllegalStateException(
+                        "Java binary not found or not executable.\n" +
+                        "Path: ${javaBinary.absolutePath}\n" +
+                        "Try reinstalling the JRE from App Settings."
+                    )
+                }
+
+                // ── Build command ──────────────────────────────────────────────
+                val jvmArgs = customJvmArgs ?: listOf(
                     "-Xmx${ramMb}M",
                     "-Xms${ramMb / 2}M",
                     "-XX:+UseG1GC",
                     "-XX:+ParallelRefProcEnabled",
-                    "-XX:MaxGCPauseMillis=200",
-                    "-jar", "server.jar", "nogui"
+                    "-XX:MaxGCPauseMillis=200"
                 )
+                val cmd = listOf(javaBinary.absolutePath) + jvmArgs + listOf("-jar", "server.jar", "nogui")
                 Log.i(TAG, "[$serverId] Launching: ${cmd.joinToString(" ")}")
 
                 val pb = ProcessBuilder(cmd)
                     .directory(serverDir)
-                    .redirectErrorStream(true) // merge stderr into stdout
+                    .redirectErrorStream(true)
 
                 process = pb.start()
                 stdin = PrintWriter(process!!.outputStream, true)
@@ -76,34 +93,36 @@ class ServerProcess(
                 _status.value = ServerStatus.RUNNING
                 onStatusChange(serverId, ServerStatus.RUNNING)
 
-                // Pipe stdout/stderr into the SharedFlow
+                // Pipe stdout+stderr into the SharedFlow
                 val reader = BufferedReader(InputStreamReader(process!!.inputStream))
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     _consoleLines.emit(line!!)
                 }
 
-                // Process has exited
                 val exitCode = process!!.waitFor()
                 Log.i(TAG, "[$serverId] Process exited with code $exitCode")
+
+                if (exitCode != 0) {
+                    lastError = "Process exited with code $exitCode. Check the Console tab for details."
+                }
                 val finalStatus = if (exitCode == 0) ServerStatus.STOPPED else ServerStatus.CRASHED
                 _status.value = finalStatus
                 onStatusChange(serverId, finalStatus)
 
             }.onFailure { e ->
                 Log.e(TAG, "[$serverId] Server process error", e)
+                lastError = e.message ?: e.javaClass.simpleName
                 _status.value = ServerStatus.CRASHED
                 onStatusChange(serverId, ServerStatus.CRASHED)
             }
         }
     }
 
-    /** Sends a command to the server's stdin (e.g. "stop", "say Hello", "list"). */
+    /** Sends a command to the server's stdin while it is running. */
     fun sendCommand(command: String) {
         if (_status.value != ServerStatus.RUNNING) return
-        scope.launch {
-            stdin?.println(command)
-        }
+        scope.launch { stdin?.println(command) }
     }
 
     /** Gracefully stops the server; force-kills after [STOP_TIMEOUT_MS]. */
@@ -113,7 +132,15 @@ class ServerProcess(
         _status.value = ServerStatus.STOPPING
         onStatusChange(serverId, ServerStatus.STOPPING)
 
-        sendCommand("stop")
+        // Write "stop" DIRECTLY to stdin — bypasses the sendCommand() RUNNING-only guard.
+        withContext(Dispatchers.IO) {
+            try {
+                stdin?.println("stop")
+                stdin?.flush()
+            } catch (e: Exception) {
+                Log.w(TAG, "[$serverId] Could not write stop to stdin: ${e.message}")
+            }
+        }
 
         withContext(Dispatchers.IO) {
             val proc = process ?: return@withContext

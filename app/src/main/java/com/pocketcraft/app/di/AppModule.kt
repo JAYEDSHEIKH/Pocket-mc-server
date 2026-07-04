@@ -24,20 +24,20 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    // ── Database ──────────────────────────────────────────────────────────
+    // ── Database ──────────────────────────────────────────────────────────────
 
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
         Room.databaseBuilder(ctx, AppDatabase::class.java, "pocketcraft.db")
-            .fallbackToDestructiveMigration()
+            .addMigrations(AppDatabase.MIGRATION_1_2)   // never destroy user data
             .build()
 
     @Provides
     @Singleton
     fun provideServerProfileDao(db: AppDatabase): ServerProfileDao = db.serverProfileDao()
 
-    // ── Network ───────────────────────────────────────────────────────────
+    // ── Network ───────────────────────────────────────────────────────────────
 
     @Provides
     @Singleton
@@ -49,11 +49,10 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)   // large server jars take time
+        .writeTimeout(60, TimeUnit.SECONDS)
         .addInterceptor(
-            HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            }
+            HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
         )
         .build()
 

@@ -10,11 +10,6 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Singleton registry of all running server processes.
- *
- * Lives outside of any DI scope so that the ServerForegroundService and
- * ViewModels can both observe the same live state without a binding
- * back-and-forth.
- *
  * Access via [ServerProcessManager.instance].
  */
 class ServerProcessManager private constructor() {
@@ -22,8 +17,7 @@ class ServerProcessManager private constructor() {
     companion object {
         private const val TAG = "ServerProcessManager"
 
-        @Volatile
-        private var _instance: ServerProcessManager? = null
+        @Volatile private var _instance: ServerProcessManager? = null
 
         val instance: ServerProcessManager
             get() = _instance ?: synchronized(this) {
@@ -33,7 +27,6 @@ class ServerProcessManager private constructor() {
 
     private val processes = ConcurrentHashMap<String, ServerProcess>()
 
-    // Global status map: serverId → ServerStatus (observed by ViewModels)
     private val _allStatuses = MutableStateFlow<Map<String, ServerStatus>>(emptyMap())
     val allStatuses: StateFlow<Map<String, ServerStatus>> = _allStatuses.asStateFlow()
 
@@ -41,18 +34,32 @@ class ServerProcessManager private constructor() {
         serverId: String,
         javaBinary: File,
         serverDir: File,
-        ramMb: Int
+        ramMb: Int,
+        customStartCommand: String? = null
     ) {
         if (processes.containsKey(serverId)) {
             Log.w(TAG, "[$serverId] Already has an active process — ignoring start request")
             return
         }
 
+        // Parse the custom command string into a JVM-args list.
+        // Strip any trailing "-jar server.jar nogui" the user might have included.
+        val customJvmArgs: List<String>? = customStartCommand
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.split("\\s+".toRegex())
+            ?.filter { it.isNotBlank() }
+            ?.let { args ->
+                val jarIdx = args.indexOf("-jar")
+                if (jarIdx >= 0) args.take(jarIdx) else args
+            }
+
         val proc = ServerProcess(
             serverId = serverId,
             javaBinary = javaBinary,
             serverDir = serverDir,
             ramMb = ramMb,
+            customJvmArgs = customJvmArgs,
             onStatusChange = { id, status -> updateStatus(id, status) }
         )
         processes[serverId] = proc
@@ -65,7 +72,6 @@ class ServerProcessManager private constructor() {
             return
         }
         proc.stop()
-        // Process removal happens via onStatusChange when it reaches STOPPED/CRASHED
         processes.remove(serverId)
     }
 
@@ -77,6 +83,9 @@ class ServerProcessManager private constructor() {
 
     fun getStatus(serverId: String): ServerStatus =
         processes[serverId]?.status?.value ?: ServerStatus.STOPPED
+
+    /** Returns the last error description from a crashed process, or null. */
+    fun getLastError(serverId: String): String? = processes[serverId]?.lastError
 
     fun isRunning(serverId: String): Boolean =
         processes[serverId]?.status?.value in listOf(
@@ -91,7 +100,6 @@ class ServerProcessManager private constructor() {
         Log.d(TAG, "[$serverId] Status → $status")
     }
 
-    /** Called when the ForegroundService is destroyed — forcibly kills all processes. */
     fun destroyAll() {
         processes.values.forEach { it.destroy() }
         processes.clear()

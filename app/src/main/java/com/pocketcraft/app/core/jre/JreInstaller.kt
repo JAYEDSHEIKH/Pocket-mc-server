@@ -2,6 +2,7 @@ package com.pocketcraft.app.core.jre
 
 import android.content.Context
 import android.util.Log
+import com.pocketcraft.app.core.storage.StorageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,31 +14,31 @@ import javax.inject.Singleton
  * Extracts the bundled aarch64 OpenJDK 21 tarball from assets into app-private
  * internal storage on first run.  Subsequent runs are a fast file-existence check.
  *
- * Asset path: assets/jre/aarch64-jdk21.tar.gz
- * Destination: filesDir/jre/   (app-private, no root needed)
- * Java binary: filesDir/jre/<top-dir>/bin/java
+ * Asset path:  assets/jre/aarch64-jdk21.tar.gz
+ * Destination: StorageManager.jreDir  (internal storage, app-private)
  */
 @Singleton
 class JreInstaller @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val storageManager: StorageManager
 ) {
     companion object {
         private const val TAG = "JreInstaller"
         private const val ASSET_PATH = "jre/aarch64-jdk21.tar.gz"
-        private const val JRE_DIR_NAME = "jre"
         private const val MARKER_FILE = ".extracted"
     }
 
-    private val jreRoot: File get() = File(context.filesDir, JRE_DIR_NAME)
+    private val jreRoot: File get() = storageManager.jreDir
 
     /** Returns the File for the java binary, or null if extraction fails. */
     suspend fun getJavaBinary(): File? = withContext(Dispatchers.IO) {
-        // Fast path: already extracted
         if (isAlreadyExtracted()) {
-            return@withContext findJavaBinary()
+            val bin = findJavaBinary()
+            Log.i(TAG, "JRE already extracted. Binary: ${bin?.absolutePath}")
+            return@withContext bin
         }
 
-        Log.i(TAG, "JRE not yet extracted — starting extraction...")
+        Log.i(TAG, "JRE not yet extracted — starting extraction to ${jreRoot.absolutePath}...")
         jreRoot.mkdirs()
 
         runCatching {
@@ -45,27 +46,27 @@ class JreInstaller @Inject constructor(
             File(jreRoot, MARKER_FILE).createNewFile()
             Log.i(TAG, "JRE extraction complete.")
         }.onFailure { e ->
-            Log.e(TAG, "JRE extraction failed", e)
+            Log.e(TAG, "JRE extraction failed: ${e.message}", e)
             jreRoot.deleteRecursively()
             return@withContext null
         }
 
-        findJavaBinary()
+        val bin = findJavaBinary()
+        Log.i(TAG, "JRE binary resolved to: ${bin?.absolutePath}")
+        bin
     }
 
     private fun isAlreadyExtracted(): Boolean =
         File(jreRoot, MARKER_FILE).exists() && findJavaBinary()?.exists() == true
 
     /**
-     * Finds the java binary by walking one level into the jre root to find the
-     * top-level directory created by the tarball (e.g. zulu21.38.21-ca-jre21.0.5-linux_aarch64/).
+     * Finds the java binary by walking one level into the jre root to locate the
+     * top-level directory created by the tarball (e.g. zulu21.XX-linux_aarch64/).
      */
     private fun findJavaBinary(): File? {
-        // Direct path if already known
         val direct = File(jreRoot, "bin/java")
-        if (direct.exists()) return direct
+        if (direct.exists()) return direct.also { it.setExecutable(true) }
 
-        // Walk one level of sub-directories (the tarball top-level folder)
         val topDirs = jreRoot.listFiles { f -> f.isDirectory } ?: return null
         for (dir in topDirs) {
             val candidate = File(dir, "bin/java")
@@ -77,37 +78,32 @@ class JreInstaller @Inject constructor(
         return null
     }
 
-    /** Extract using the system `tar` command available on all modern Android (API 26+). */
+    /** Extract using the system `tar` command (available on all Android API 26+). */
     private fun extractTarball() {
-        // Copy asset to a temp file first (tar can't read from a stream directly)
         val tmpTar = File(context.cacheDir, "jdk21.tar.gz")
         context.assets.open(ASSET_PATH).use { input ->
             tmpTar.outputStream().use { output -> input.copyTo(output) }
         }
 
-        val process = ProcessBuilder(
-            "tar", "-xzf", tmpTar.absolutePath, "-C", jreRoot.absolutePath
-        ).redirectErrorStream(true).start()
+        val process = ProcessBuilder("tar", "-xzf", tmpTar.absolutePath, "-C", jreRoot.absolutePath)
+            .redirectErrorStream(true)
+            .start()
 
-        // IMPORTANT: drain stdout/stderr in a background thread BEFORE calling waitFor().
-        // If tar prints more output than the OS pipe buffer (~64 KB), the process blocks
-        // waiting for us to read while we're blocking waiting for it to exit — deadlock.
-        val outputCapture = StringBuilder()
-        val drainThread = Thread {
-            try {
-                outputCapture.append(process.inputStream.bufferedReader().readText())
-            } catch (_: Exception) {}
+        // Drain stdout/stderr BEFORE waitFor() to avoid pipe-buffer deadlock
+        val output = StringBuilder()
+        val drain = Thread {
+            try { output.append(process.inputStream.bufferedReader().readText()) }
+            catch (_: Exception) {}
         }.also { it.isDaemon = true; it.start() }
 
         val exitCode = process.waitFor()
-        drainThread.join(5_000)
+        drain.join(5_000)
         tmpTar.delete()
 
         if (exitCode != 0) {
-            throw RuntimeException("tar extraction failed (exit $exitCode): $outputCapture")
+            throw RuntimeException("tar extraction failed (exit $exitCode):\n$output")
         }
 
-        // Ensure all extracted binaries are executable
         setExecutableBit(jreRoot)
     }
 
