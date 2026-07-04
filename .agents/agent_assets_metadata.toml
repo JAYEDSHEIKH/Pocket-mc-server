@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "G7sGyKsta8vegmBg0xb_E"
+uri = "file://output/PocketCraft-debug.apk"
+type = "unspecified"
+title = "PocketCraft-debug.apk (JRE bundled)"

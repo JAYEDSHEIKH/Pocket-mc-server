@@ -25,33 +25,6 @@ android {
         }
     }
 
-    signingConfigs {
-        // Release signing — driven entirely by environment variables so the
-        // keystore never lives in the repository.
-        //
-        // Set these env vars (locally or in GitHub Secrets via CI):
-        //   SIGNING_STORE_FILE      — path to the .keystore file
-        //   SIGNING_STORE_PASSWORD  — keystore password
-        //   SIGNING_KEY_ALIAS       — key alias inside the keystore
-        //   SIGNING_KEY_PASSWORD    — key password
-        //
-        // When any variable is missing the release build falls back to unsigned
-        // (safe for local development; CI will always have the secrets).
-        val storeFile = System.getenv("SIGNING_STORE_FILE")
-        val storePass = System.getenv("SIGNING_STORE_PASSWORD")
-        val keyAlias  = System.getenv("SIGNING_KEY_ALIAS")
-        val keyPass   = System.getenv("SIGNING_KEY_PASSWORD")
-
-        if (storeFile != null && storePass != null && keyAlias != null && keyPass != null) {
-            create("release") {
-                this.storeFile     = file(storeFile)
-                this.storePassword = storePass
-                this.keyAlias      = keyAlias
-                this.keyPassword   = keyPass
-            }
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -60,9 +33,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Use release signing config when available; unsigned otherwise
-            val releaseSigning = signingConfigs.findByName("release")
-            if (releaseSigning != null) signingConfig = releaseSigning
         }
         debug {
             isDebuggable = true
