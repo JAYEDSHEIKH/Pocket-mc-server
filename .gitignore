@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+build/
+app/build/
+**/build/
+
+# Android
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Tools (local SDK install — machine-specific, not committed)
+tools/
+
+# Build output
+output/
+
+# IntelliJ / Android Studio
+*.iml
+.idea/
+*.iws
+*.ipr
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Replit
+.upm/
+.config/
+replit.nix

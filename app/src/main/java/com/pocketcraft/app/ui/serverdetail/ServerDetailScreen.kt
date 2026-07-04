@@ -70,7 +70,7 @@ fun ServerDetailScreen(
                     )
                     if (isTransitioning) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp).padding(end = 8.dp),
+                            modifier = Modifier.padding(end = 8.dp).size(24.dp),
                             strokeWidth = 2.dp
                         )
                     } else {

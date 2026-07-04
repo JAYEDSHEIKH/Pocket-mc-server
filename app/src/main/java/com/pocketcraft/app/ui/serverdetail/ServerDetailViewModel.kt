@@ -43,14 +43,30 @@ class ServerDetailViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerStatus.STOPPED)
 
-    /** Console log lines from the running process (empty if server not running). */
+    /**
+     * Console log lines from the running process (empty if server not running).
+     *
+     * Re-subscribes to the process's SharedFlow whenever [allStatuses] changes.
+     * This is critical: stopping and restarting a server creates a new [ServerProcess]
+     * with a brand-new SharedFlow.  Without this re-subscription, the console would
+     * go silent after the first restart because we'd still be collecting the old
+     * (now completed) flow.
+     */
     val consoleLines: StateFlow<List<String>> = _serverId
         .filterNotNull()
         .flatMapLatest { id ->
-            val flow = processManager.getConsoleFlow(id)
-            flow?.scan(emptyList<String>()) { acc, line ->
-                (acc + line).takeLast(2_000)
-            } ?: flowOf(emptyList())
+            // Re-trigger the inner subscription every time the status map changes.
+            // distinctUntilChanged() prevents redundant re-subscriptions for
+            // unrelated server status updates.
+            processManager.allStatuses
+                .map { it[id] }
+                .distinctUntilChanged()
+                .flatMapLatest {
+                    val flow = processManager.getConsoleFlow(id)
+                    flow?.scan(emptyList<String>()) { acc, line ->
+                        (acc + line).takeLast(2_000)
+                    } ?: flowOf(emptyList())
+                }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

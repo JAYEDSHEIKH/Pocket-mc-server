@@ -89,12 +89,22 @@ class JreInstaller @Inject constructor(
             "tar", "-xzf", tmpTar.absolutePath, "-C", jreRoot.absolutePath
         ).redirectErrorStream(true).start()
 
+        // IMPORTANT: drain stdout/stderr in a background thread BEFORE calling waitFor().
+        // If tar prints more output than the OS pipe buffer (~64 KB), the process blocks
+        // waiting for us to read while we're blocking waiting for it to exit — deadlock.
+        val outputCapture = StringBuilder()
+        val drainThread = Thread {
+            try {
+                outputCapture.append(process.inputStream.bufferedReader().readText())
+            } catch (_: Exception) {}
+        }.also { it.isDaemon = true; it.start() }
+
         val exitCode = process.waitFor()
+        drainThread.join(5_000)
         tmpTar.delete()
 
         if (exitCode != 0) {
-            val stderr = process.inputStream.bufferedReader().readText()
-            throw RuntimeException("tar extraction failed (exit $exitCode): $stderr")
+            throw RuntimeException("tar extraction failed (exit $exitCode): $outputCapture")
         }
 
         // Ensure all extracted binaries are executable

@@ -55,7 +55,6 @@ class ServerProcess(
 
         scope.launch {
             runCatching {
-                val heapG = maxOf(1, ramMb / 1024)
                 val cmd = listOf(
                     javaBinary.absolutePath,
                     "-Xmx${ramMb}M",

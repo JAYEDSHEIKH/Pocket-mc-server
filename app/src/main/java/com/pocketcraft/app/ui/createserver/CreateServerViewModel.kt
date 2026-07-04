@@ -139,8 +139,8 @@ class CreateServerViewModel @Inject constructor(
 
             runCatching {
                 // Fetch the latest build URL for the chosen version
-                val builds = paperApi.getBuilds(state.selectedVersion)
-                val build = builds.latestStable()
+                val response = paperApi.getBuilds(state.selectedVersion)
+                val build = response.builds.latestStable()
                     ?: throw IllegalStateException("No builds found for ${state.selectedVersion}")
                 val downloadUrl = build.applicationDownloadUrl()
 
