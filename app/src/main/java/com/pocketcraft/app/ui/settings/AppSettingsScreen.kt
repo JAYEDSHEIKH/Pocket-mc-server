@@ -17,7 +17,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketcraft.app.AppPrefs
 import com.pocketcraft.app.BuildConfig
-import com.pocketcraft.app.ui.components.ProgressDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,17 +31,44 @@ fun AppSettingsScreen(
     val autoScroll by AppPrefs.autoScrollConsole.collectAsStateWithLifecycle()
     val keepScreenOn by AppPrefs.keepScreenOn.collectAsStateWithLifecycle()
 
-    if (uiState.isReextractingJre) {
-        ProgressDialog(title = "Re-extracting JRE", message = "Extracting bundled Java 21 from APK assets…")
+    // ── Working dialog (download / extract) ───────────────────────────────────
+    if (uiState.isWorking) {
+        AlertDialog(
+            onDismissRequest = { /* not dismissable during work */ },
+            title = { Text("Java Runtime") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(uiState.workPhase, style = MaterialTheme.typography.bodyMedium)
+                    val progress = uiState.downloadProgress
+                    if (progress != null) {
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (uiState.totalMb > 0f) {
+                            Text(
+                                "%.1f / %.1f MB".format(uiState.downloadedMb, uiState.totalMb),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {}
+        )
     }
 
-    uiState.reextractResult?.let { result ->
+    // ── Result dialog ─────────────────────────────────────────────────────────
+    uiState.actionResult?.let { result ->
         AlertDialog(
-            onDismissRequest = viewModel::clearReextractResult,
-            title = { Text("JRE Re-extraction") },
+            onDismissRequest = viewModel::clearActionResult,
+            title = { Text("Java Runtime") },
             text = { Text(result) },
             confirmButton = {
-                TextButton(onClick = viewModel::clearReextractResult) { Text("OK") }
+                TextButton(onClick = viewModel::clearActionResult) { Text("OK") }
             }
         )
     }
@@ -103,7 +129,6 @@ fun AppSettingsScreen(
 
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // Auto-scroll toggle
                     ListItem(
                         headlineContent = { Text("Auto-scroll to latest") },
                         supportingContent = { Text("Automatically scroll to the newest log line") },
@@ -119,7 +144,6 @@ fun AppSettingsScreen(
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    // Console line count
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -156,7 +180,6 @@ fun AppSettingsScreen(
 
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // Keep screen on
                     ListItem(
                         headlineContent = { Text("Keep screen on while running") },
                         supportingContent = { Text("Prevents the screen from sleeping when a server is active") },
@@ -172,7 +195,6 @@ fun AppSettingsScreen(
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    // Stop timeout
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -220,7 +242,7 @@ fun AppSettingsScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // ── Runtime ───────────────────────────────────────────────────────
+            // ── Java Runtime ──────────────────────────────────────────────────
             SectionHeader("Java Runtime (JRE)")
 
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -230,26 +252,37 @@ fun AppSettingsScreen(
                         supportingContent = { Text(uiState.jreStatus) },
                         leadingContent = {
                             Icon(
-                                if (uiState.jrePresent) Icons.Default.CheckCircle else Icons.Default.Error,
+                                if (uiState.jrePresent) Icons.Default.CheckCircle else Icons.Default.CloudDownload,
                                 contentDescription = null,
                                 tint = if (uiState.jrePresent) MaterialTheme.colorScheme.primary
-                                       else MaterialTheme.colorScheme.error
+                                       else MaterialTheme.colorScheme.secondary
                             )
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     ListItem(
-                        headlineContent = { Text("Re-extract Java Runtime") },
-                        supportingContent = { Text("Fixes issues if the bundled JRE is corrupted or missing") },
+                        headlineContent = {
+                            Text(if (uiState.jrePresent) "Re-download Java Runtime" else "Download Java Runtime")
+                        },
+                        supportingContent = {
+                            Text(
+                                if (uiState.jrePresent)
+                                    "Re-downloads OpenJDK 21 (aarch64) from adoptium.net (~50 MB)"
+                                else
+                                    "Downloads OpenJDK 21 (aarch64) from adoptium.net — required to run servers (~50 MB)"
+                            )
+                        },
                         leadingContent = {
-                            Icon(Icons.Default.Refresh, contentDescription = null,
+                            Icon(Icons.Default.Download, contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary)
                         },
                         trailingContent = {
                             OutlinedButton(
-                                onClick = viewModel::reextractJre,
-                                enabled = !uiState.isReextractingJre
-                            ) { Text("Re-extract") }
+                                onClick = viewModel::redownloadJre,
+                                enabled = !uiState.isWorking
+                            ) {
+                                Text(if (uiState.jrePresent) "Re-download" else "Download")
+                            }
                         }
                     )
                 }
@@ -273,7 +306,7 @@ fun AppSettingsScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     ListItem(
                         headlineContent = { Text("Powered by PaperMC") },
-                        supportingContent = { Text("Running on-device via bundled OpenJDK 21 (aarch64)") },
+                        supportingContent = { Text("Running on-device via OpenJDK 21 (aarch64) — downloaded at first use") },
                         leadingContent = {
                             Icon(Icons.Default.Storage, contentDescription = null,
                                 tint = MaterialTheme.colorScheme.secondary)
@@ -284,26 +317,27 @@ fun AppSettingsScreen(
                         headlineContent = { Text("Distribution") },
                         supportingContent = { Text("APK via GitHub Releases (not Play Store — this app runs a live JVM)") },
                         leadingContent = {
-                            Icon(Icons.Default.Download, contentDescription = null,
+                            Icon(Icons.Default.OpenInNew, contentDescription = null,
                                 tint = MaterialTheme.colorScheme.secondary)
                         }
                     )
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
+// ── Small reusable composables ────────────────────────────────────────────────
+
 @Composable
-private fun SectionHeader(title: String) {
+private fun SectionHeader(text: String) {
     Text(
-        text = title.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, top = 8.dp)
+        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
     )
 }
 
@@ -316,15 +350,14 @@ private fun ThemeModeItem(
 ) {
     ListItem(
         headlineContent = { Text(label) },
-        leadingContent = { Icon(icon, contentDescription = null) },
+        leadingContent = {
+            Icon(icon, contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurfaceVariant)
+        },
         trailingContent = {
-            if (selected) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
+            if (selected) Icon(Icons.Default.Check, contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.primary)
         },
         modifier = Modifier.clickable(onClick = onClick)
     )

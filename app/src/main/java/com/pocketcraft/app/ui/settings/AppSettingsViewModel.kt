@@ -1,6 +1,5 @@
 package com.pocketcraft.app.ui.settings
 
-import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,7 +7,6 @@ import com.pocketcraft.app.AppPrefs
 import com.pocketcraft.app.core.jre.JreInstaller
 import com.pocketcraft.app.core.storage.StorageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,14 +17,18 @@ import javax.inject.Inject
 
 @HiltViewModel
 class AppSettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val jreInstaller: JreInstaller,
     private val storageManager: StorageManager
 ) : ViewModel() {
 
     data class UiState(
-        val isReextractingJre: Boolean = false,
-        val reextractResult: String? = null,
+        val isWorking: Boolean = false,
+        /** null = progress unknown (querying API / extracting); 0f..1f = download progress */
+        val downloadProgress: Float? = null,
+        val downloadedMb: Float = 0f,
+        val totalMb: Float = 0f,
+        val workPhase: String = "",          // e.g. "Querying API…", "Downloading…", "Extracting…"
+        val actionResult: String? = null,    // success / failure message shown in dialog
         val jrePresent: Boolean = false,
         val jreStatus: String = "Checking…"
     )
@@ -52,59 +54,87 @@ class AppSettingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         jrePresent = false,
-                        jreStatus = "Not found — servers will not start until this APK includes the bundled JRE (built via GitHub Actions CI)"
+                        jreStatus = "Not downloaded yet — will be fetched automatically when you start a server"
                     )
                 }
             }
         }
     }
 
-    fun setThemeMode(mode: AppPrefs.ThemeMode) {
-        AppPrefs.setThemeMode(mode)
-    }
+    fun setThemeMode(mode: AppPrefs.ThemeMode) = AppPrefs.setThemeMode(mode)
 
     fun storageDisplayPath(): String = storageManager.displayRootPath()
 
     /**
-     * Deletes the extracted JRE directory and forces a full re-extraction.
-     * Useful when extraction was corrupted or the JRE was partially extracted.
+     * Deletes any existing JRE installation and triggers a fresh download from Adoptium.
+     * Useful when the installation is corrupted or the user wants to update the JRE.
      */
-    fun reextractJre() {
+    fun redownloadJre() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isReextractingJre = true, reextractResult = null) }
-            try {
-                val jreDir = storageManager.jreDir
-                jreDir.deleteRecursively()
-                jreDir.mkdirs()
-                val binary = jreInstaller.getJavaBinary()
-                val result = if (binary != null) {
-                    "JRE extracted successfully.\nBinary: ${binary.absolutePath}"
-                } else {
-                    "Extraction failed — this APK does not contain the JRE asset.\n\n" +
-                    "The APK must be built via the GitHub Actions CI workflow which downloads " +
-                    "and bundles the OpenJDK 21 aarch64 JRE automatically.\n\n" +
-                    "Download a CI-built APK from your repository's Actions tab."
+            _uiState.update { it.copy(isWorking = true, actionResult = null, workPhase = "Starting…") }
+
+            // Observe JreInstaller state to relay progress to the UI
+            val progressJob = launch {
+                jreInstaller.state.collect { state ->
+                    when (state) {
+                        is JreInstaller.State.Querying -> _uiState.update {
+                            it.copy(workPhase = state.message, downloadProgress = null)
+                        }
+                        is JreInstaller.State.Downloading -> _uiState.update {
+                            it.copy(
+                                workPhase = "Downloading OpenJDK 21…",
+                                downloadProgress = state.progress,
+                                downloadedMb = state.downloadedMb,
+                                totalMb = state.totalMb
+                            )
+                        }
+                        is JreInstaller.State.Extracting -> _uiState.update {
+                            it.copy(workPhase = "Extracting…", downloadProgress = null)
+                        }
+                        else -> { /* Ready / Failed / Idle handled after getJavaBinary() returns */ }
+                    }
                 }
-                _uiState.update {
-                    it.copy(
-                        isReextractingJre = false,
-                        reextractResult = result,
-                        jrePresent = binary != null,
-                        jreStatus = if (binary != null) "Installed — ${binary.absolutePath}"
-                                    else "Not found — build via GitHub Actions CI"
-                    )
+            }
+
+            try {
+                // Wipe previous installation so getJavaBinary() re-downloads
+                storageManager.jreDir.deleteRecursively()
+                storageManager.jreDir.mkdirs()
+
+                val binary = jreInstaller.getJavaBinary()
+                progressJob.cancel()
+
+                if (binary != null) {
+                    _uiState.update {
+                        it.copy(
+                            isWorking = false,
+                            actionResult = "OpenJDK 21 downloaded successfully.\nBinary: ${binary.absolutePath}",
+                            jrePresent = true,
+                            jreStatus = "Installed — ${binary.absolutePath}"
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isWorking = false,
+                            actionResult = "Download failed — check your internet connection and try again.",
+                            jrePresent = false,
+                            jreStatus = "Not installed — tap 'Download JRE' to retry"
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                Log.e("AppSettingsVM", "JRE re-extract failed", e)
+                progressJob.cancel()
+                Log.e("AppSettingsVM", "JRE re-download failed", e)
                 _uiState.update {
                     it.copy(
-                        isReextractingJre = false,
-                        reextractResult = "Error: ${e.message}"
+                        isWorking = false,
+                        actionResult = "Error: ${e.message}"
                     )
                 }
             }
         }
     }
 
-    fun clearReextractResult() = _uiState.update { it.copy(reextractResult = null) }
+    fun clearActionResult() = _uiState.update { it.copy(actionResult = null) }
 }

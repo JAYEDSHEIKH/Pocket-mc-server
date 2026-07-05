@@ -150,23 +150,44 @@ class ServerForegroundService : Service() {
     ) {
         Log.i(TAG, "[$serverId] Starting — serverDir=${serverDir.absolutePath}")
 
-        // ── Pre-flight: JRE ───────────────────────────────────────────────────
+        // ── Pre-flight: JRE (downloads automatically on first run) ───────────
+        // Observe download progress and reflect it in the notification so the
+        // user can see what is happening while the foreground service is active.
+        val progressJob = scope.launch {
+            jreInstaller.state.collect { state ->
+                val text = when (state) {
+                    is JreInstaller.State.Querying    -> "Resolving JRE download URL…"
+                    is JreInstaller.State.Downloading -> {
+                        val pct = (state.progress * 100).toInt()
+                        if (state.totalMb > 0f)
+                            "Downloading JRE: $pct% (${state.downloadedMb.toInt()}/${state.totalMb.toInt()} MB)"
+                        else
+                            "Downloading JRE: ${state.downloadedMb.toInt()} MB…"
+                    }
+                    is JreInstaller.State.Extracting  -> "Extracting JRE…"
+                    else -> return@collect
+                }
+                getSystemService(NotificationManager::class.java)
+                    .notify(NOTIFICATION_ID, buildNotification(text))
+            }
+        }
+
         val javaBinary = jreInstaller.getJavaBinary()
+        progressJob.cancel()
+
         if (javaBinary == null) {
-            val jrePath = storageManager.jreDir.absolutePath
             val msg = buildString {
-                appendLine("Java Runtime (JRE) could not be found.")
+                appendLine("Java Runtime (JRE) could not be set up.")
                 appendLine()
-                appendLine("The bundled OpenJDK 21 (aarch64) could not be extracted from this APK.")
+                appendLine("PocketCraft downloads OpenJDK 21 (aarch64) from adoptium.net")
+                appendLine("the first time a server is started. The download failed.")
                 appendLine()
-                appendLine("Most likely causes:")
-                appendLine("• This APK was built locally without the JRE asset inside it.")
-                appendLine("• The GitHub Actions CI workflow has not run yet.")
+                appendLine("Check that:")
+                appendLine("• Your device has an active internet connection.")
+                appendLine("• adoptium.net is reachable from your network.")
                 appendLine()
-                appendLine("Fix: Download the debug APK from your GitHub repository's")
-                appendLine("Actions tab → latest run → Artifacts → PocketCraft-debug.apk")
-                appendLine()
-                appendLine("Expected JRE path: $jrePath")
+                appendLine("You can also trigger the download manually from")
+                appendLine("App Settings → Java Runtime → Download JRE.")
             }
             Log.e(TAG, "[$serverId] $msg")
             manager.emitError(serverId, msg)
