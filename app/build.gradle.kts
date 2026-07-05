@@ -54,6 +54,13 @@ android {
         buildConfig = true
     }
 
+    androidResources {
+        // Prevent AAPT2 from decompressing .gz assets.
+        // Without this, aarch64-jdk21.tar.gz is silently unpacked to .tar
+        // inside the APK, breaking AssetManager.open("…tar.gz").
+        noCompress += listOf("gz")
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

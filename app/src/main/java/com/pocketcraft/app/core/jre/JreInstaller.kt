@@ -24,7 +24,11 @@ class JreInstaller @Inject constructor(
 ) {
     companion object {
         private const val TAG = "JreInstaller"
-        private const val ASSET_PATH = "jre/aarch64-jdk21.tar.gz"
+        // AAPT2 strips the .gz wrapper when packaging assets, storing the file
+        // as "aarch64-jdk21.tar" (plain tarball).  We try both paths so the code
+        // works regardless of AAPT2 version or future toolchain changes.
+        private const val ASSET_PATH_GZ  = "jre/aarch64-jdk21.tar.gz"
+        private const val ASSET_PATH_TAR = "jre/aarch64-jdk21.tar"
         private const val MARKER_FILE = ".extracted"
     }
 
@@ -86,12 +90,35 @@ class JreInstaller @Inject constructor(
 
     /** Extract using the system `tar` command (available on all Android API 26+). */
     private fun extractTarball() {
-        val tmpTar = File(context.cacheDir, "jdk21.tar.gz")
-        context.assets.open(ASSET_PATH).use { input ->
+        // AAPT2 strips the .gz wrapper when packaging assets — the file ends up as
+        // a plain .tar inside the APK. Try .tar.gz first (future-proof), then .tar.
+        val (assetPath, isGzip) = try {
+            context.assets.open(ASSET_PATH_GZ).close()
+            Pair(ASSET_PATH_GZ, true)
+        } catch (_: Exception) {
+            try {
+                context.assets.open(ASSET_PATH_TAR).close()
+                Pair(ASSET_PATH_TAR, false)
+            } catch (e: Exception) {
+                throw RuntimeException(
+                    "JRE asset not found in APK. Expected '$ASSET_PATH_GZ' or " +
+                    "'$ASSET_PATH_TAR' in assets/. This APK was likely built " +
+                    "without the JRE bundled.", e
+                )
+            }
+        }
+
+        Log.i(TAG, "Using asset '$assetPath' (gzip=$isGzip)")
+
+        val tmpExt = if (isGzip) "tar.gz" else "tar"
+        val tmpTar = File(context.cacheDir, "jdk21.$tmpExt")
+        context.assets.open(assetPath).use { input ->
             tmpTar.outputStream().use { output -> input.copyTo(output) }
         }
 
-        val process = ProcessBuilder("tar", "-xzf", tmpTar.absolutePath, "-C", jreRoot.absolutePath)
+        // Use -xzf for gzip-compressed tarballs, -xf for plain tarballs
+        val tarFlags = if (isGzip) "-xzf" else "-xf"
+        val process = ProcessBuilder("tar", tarFlags, tmpTar.absolutePath, "-C", jreRoot.absolutePath)
             .redirectErrorStream(true)
             .start()
 
